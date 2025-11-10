@@ -125,6 +125,7 @@ async fn main() -> Result<()> {
             endpoint.set_default_client_config(client_config);
             let context = Context::new();
             let tcp_listener = TcpListener::bind((local_bind.clone(), local_port)).await?;
+            info!("client listening on {}:{}", local_bind, local_port);
             client::run_client(context, tcp_listener, target_address, endpoint, server, port).await;
         }
     }
