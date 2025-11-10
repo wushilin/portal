@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::messages;
 
 pub async fn run_server(mut context: Context, endpoint: quinn::Endpoint) {
-    info!("run_server started main loop");
+    info!("starting server main loop");
     loop {
         let incoming = endpoint.accept().await;
         match incoming {
@@ -20,7 +20,7 @@ pub async fn run_server(mut context: Context, endpoint: quinn::Endpoint) {
             }
         }
     }
-    info!("run_server ended main loop. endpoint closed");
+    info!("endpoint closed");
 }
 
 async fn handle_server_connection(context: Context, incoming: quinn::Incoming) {
@@ -34,7 +34,7 @@ async fn handle_server_connection(context: Context, incoming: quinn::Incoming) {
             info!("{} closed", connection_id_clone);
         }
         Err(e) => {
-            info!("Failed to accept connection due to ConnectionError: {}", e);
+            info!("failed to accept connection due to ConnectionError: {}", e);
             return;
         }
     }
@@ -139,7 +139,6 @@ async fn my_accept_bi(connection: &mut quinn::Connection) -> Result<(SendStream,
                 }
             }
             Err(e) => {
-                info!("accept_bi timed out");
                 return Err(anyhow::anyhow!("accept_bi timed out: {}", e));
             }
         }
