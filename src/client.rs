@@ -34,7 +34,7 @@ fn get_server_name(server_address: &str) -> String {
 }
 
 pub async fn run_client(mut context: Context, mut tcp_listener: TcpListener, target_address: String, endpoint: quinn::Endpoint, server_address: String) {
-    info!("Client started main loop");
+    info!("Client started main loop for target address: {}. Listening on: {}", target_address, tcp_listener.local_addr().unwrap());
     let mut loop_counter:usize = 0;
     loop {
         loop_counter += 1;
