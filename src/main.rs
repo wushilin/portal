@@ -25,46 +25,46 @@ enum Commands {
     /// Run the tunnel server
     Server {
         /// CA bundle file path
-        #[arg(long)]
+        #[arg(long, default_value = "ca.pem", help = "CA bundle file path")]
         ca_bundle: String,
         /// Server certificate file path
-        #[arg(long)]
+        #[arg(long, default_value = "server.pem", help = "server certificate file path")]
         cert: String,
         /// Server private key file path
-        #[arg(long)]
+        #[arg(long, default_value = "server.key", help = "server private key file path")]
         key: String,
         /// Bind address (e.g., 0.0.0.0)
-        #[arg(long, default_value = "0.0.0.0")]
+        #[arg(long, default_value = "0.0.0.0", help = "server bind address, the tunnel server will listen on this address for QUIC connections")]
         bind_addr: String,
         /// Port number
-        #[arg(long, default_value = "1741")]
+        #[arg(long, default_value = "1741", help = "server port number, the tunnel server will listen on this port for QUIC connections")]
         port: u16,
     },
     /// Run the tunnel client
     Client {
         /// CA bundle file path
-        #[arg(long)]
+        #[arg(long, default_value = "ca.pem", help = "CA bundle file path")]
         ca_bundle: String,
         /// Client certificate file path
-        #[arg(long)]
+        #[arg(long, default_value = "client.pem", help = "client certificate file path")]
         cert: String,
         /// Client private key file path
-        #[arg(long)]
+        #[arg(long, default_value = "client.key", help = "client private key file path")]
         key: String,
         /// Server address (e.g., 127.0.0.1)
-        #[arg(long)]
+        #[arg(long, help = "tunnel server address (e.g., tunnel.abc.com)")]
         server: String,
         /// Server port number
-        #[arg(long, default_value = "1741")]
+        #[arg(long, default_value = "1741", help = "server port number, the tunnel server will listen on this port for QUIC connections")]
         port: u16,
 
-        #[arg(long, default_value = "0.0.0.0")]
+        #[arg(long, default_value = "0.0.0.0", help = "local bind address, connecting to this address + port will tunnel the connection to the target address on the tunnel server")]
         local_bind:String,
 
-        #[arg(long)]
+        #[arg(long, help="local bind port, connecting to this port will tunnel the connection to the target address on the tunnel server")]
         local_port: u16,
 
-        #[arg(long)]
+        #[arg(long, help = "target address to tunnel to on the tunnel server (e.g., example.com:80)")]
         target_address: String,
     },
 }
