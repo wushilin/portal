@@ -7,7 +7,7 @@ pub mod client;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::{net::SocketAddr};
-use tokio::net::{TcpListener};
+use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_tree_context::Context;
 use tracing::{info};
 
@@ -58,14 +58,8 @@ enum Commands {
         #[arg(long, default_value = "1741", help = "server port number, the tunnel server will listen on this port for QUIC connections")]
         port: u16,
 
-        #[arg(long, default_value = "0.0.0.0", help = "local bind address, connecting to this address + port will tunnel the connection to the target address on the tunnel server")]
-        local_bind:String,
-
-        #[arg(long, help="local bind port, connecting to this port will tunnel the connection to the target address on the tunnel server")]
-        local_port: u16,
-
-        #[arg(long, help = "target address to tunnel to on the tunnel server (e.g., example.com:80)")]
-        target_address: String,
+        #[arg(short='L', help = "forward spec in [0.0.0.0]:8080@remote_host:remote_port format")]
+        forward_spec: Vec<String>,
     },
 }
 
@@ -110,9 +104,7 @@ async fn main() -> Result<()> {
             key,
             server,
             port,
-            local_bind,
-            local_port,
-            target_address,
+            forward_spec,
         } => {
             let client_config = quicutil::build_client_config(
                 &ca_bundle,
@@ -123,12 +115,35 @@ async fn main() -> Result<()> {
             
             let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
             endpoint.set_default_client_config(client_config);
-            let context = Context::new();
-            let tcp_listener = TcpListener::bind((local_bind.clone(), local_port)).await?;
-            info!("client listening on {}:{}", local_bind, local_port);
-            client::run_client(context, tcp_listener, target_address, endpoint, server, port).await;
+            let mut context = Context::new();
+            let server_address = format!("{}:{}", server, port);
+            let mut join_handles = Vec::new();
+            for forward_spec in forward_spec {
+                let join_handle = run_client_one_forward_spec(&mut context, endpoint.clone(), server_address.clone(), forward_spec).await?;
+                join_handles.push(join_handle);
+            }
+            for join_handle in join_handles {
+                join_handle.await?;
+            }
         }
     }
 
     Ok(())
+}
+
+pub async fn run_client_one_forward_spec(context: &mut Context, endpoint: quinn::Endpoint, server_address: String, forward_spec: String) -> Result<JoinHandle<Option<()>>> {
+    let tokens = forward_spec.split('@').collect::<Vec<&str>>();
+    if tokens.len() != 2 {
+        return Err(anyhow::anyhow!("invalid forward spec: {}", forward_spec));
+    }
+    let local_bind = tokens[0];
+    let remote_host = tokens[1];
+    let listener = TcpListener::bind(local_bind).await?;
+    info!("listening on {} forwarding to remote host: {}", local_bind, remote_host);
+    let child_context = context.new_child_context();
+    let jh = context.spawn(client::run_client(child_context,  
+        listener, 
+        remote_host.to_string(), 
+        endpoint, server_address));
+    Ok(jh)
 }

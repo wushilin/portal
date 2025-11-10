@@ -860,6 +860,7 @@ dependencies = [
  "quinn",
  "rand",
  "rcgen",
+ "regex",
  "rustls",
  "rustls-pemfile",
  "rustls-pki-types",

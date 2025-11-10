@@ -9,8 +9,7 @@ use tokio::net::{TcpListener, lookup_host};
 use crate::util::{self, ConnectionId, read_length_prefixed};
 use crate::messages;
 
-async fn lookup_server_address(server: &str, port: u16) -> Vec<SocketAddr> {
-    let server_addr = format!("{}:{}", server, port);
+async fn lookup_server_address(server_addr: &str) -> Vec<SocketAddr> {
     let addrs_result = lookup_host(&server_addr).await;
     let mut addrs = Vec::new();
     match addrs_result {
@@ -26,9 +25,16 @@ async fn lookup_server_address(server: &str, port: u16) -> Vec<SocketAddr> {
     return addrs;
 }
 
-pub async fn run_client(mut context: Context, mut tcp_listener: TcpListener, target_address: String, endpoint: quinn::Endpoint, server: String, port: u16) {
+fn get_server_name(server_address: &str) -> String {
+    let tokens = server_address.rfind(':');
+    if tokens.is_none() {
+        return server_address.to_string();
+    }
+    return server_address[..tokens.unwrap()].to_string();
+}
+
+pub async fn run_client(mut context: Context, mut tcp_listener: TcpListener, target_address: String, endpoint: quinn::Endpoint, server_address: String) {
     info!("Client started main loop");
-    
     let mut loop_counter:usize = 0;
     loop {
         loop_counter += 1;
@@ -36,13 +42,14 @@ pub async fn run_client(mut context: Context, mut tcp_listener: TcpListener, tar
             info!("Client sleeping for 5 seconds before retrying");
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
-        let addrs= lookup_server_address(&server, port).await;
+        let addrs= lookup_server_address(&server_address).await;
         if addrs.is_empty() {
-            error!("Client failed to lookup server address: {}:{}", server, port);
+            error!("Client failed to lookup server address: {}", server_address);
             continue;
         }
         let random_addr = addrs[rand::rng().random_range(0..addrs.len())];
-        let connection = endpoint.connect(random_addr, &server);
+        let server_name = get_server_name(&server_address);
+        let connection = endpoint.connect(random_addr, &server_name);
         match connection {
             Ok(connection) => {
                 let conection = connection.await;
