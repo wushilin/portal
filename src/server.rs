@@ -141,7 +141,8 @@ async fn my_accept_bi(connection: &mut quinn::Connection) -> Result<(SendStream,
             Err(e) => {
                 match e {
                     quinn::ConnectionError::TimedOut => {
-                        continue;
+                        info!("accept_bi timed out");
+                        return Err(anyhow::anyhow!("accept_bi timed out"));
                     }
                     _ => {
                         error!("accept_bi ended: failed to accept quic bi stream: {}", e);
