@@ -203,3 +203,7 @@ impl<R, W> AsyncCopy<R, W> where R: AsyncRead + Unpin, W: AsyncWrite + Unpin {
         Ok(total_copied)
     }
 }
+
+pub fn bytes_str(size:usize) -> String {
+    humansize::format_size(size, humansize::BINARY)
+}

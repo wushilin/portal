@@ -94,6 +94,7 @@ async fn main() -> Result<()> {
             let bind_addr: SocketAddr = format!("{}:{}", bind_addr, port).parse()?;
             let endpoint = quinn::Endpoint::server(server_config, bind_addr)?;
             info!("Server listening on {}", bind_addr);
+            tokio::spawn(server::print_server_stats());
             server::run_server(endpoint).await;
             info!("Server shutdown");
         }
@@ -115,6 +116,7 @@ async fn main() -> Result<()> {
             let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
             endpoint.set_default_client_config(client_config);
             let server_address = format!("{}:{}", server, port);
+            tokio::spawn(client::print_client_stats());
             let mut join_handles = Vec::new();
             for forward_spec in forward_spec {
                 let join_handle = run_client_one_forward_spec(endpoint.clone(), server_address.clone(), forward_spec).await?;

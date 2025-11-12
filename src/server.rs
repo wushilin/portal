@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use tracing::{debug, error, info};
 use crate::server_stats::ServerStatsClone;
-use crate::util::{self, ConnectionId, StreamId};
+use crate::util::{self, ConnectionId, StreamId, bytes_str};
 use quinn::{RecvStream, SendStream};
 use tokio::net::TcpStream;
 use anyhow::Result;
@@ -167,10 +167,18 @@ async fn my_accept_bi(connection: &mut quinn::Connection) -> Result<(SendStream,
 }
 
 
-async fn print_server_stats() {
+pub async fn print_server_stats() {
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
         let stats = ServerStatsClone::get();
-        info!("server stats: total connections: {}, active connections: {}, total streams: {}, active streams: {}, total upstream connections: {}, active upstream connections: {}, sent bytes: {}, received bytes: {}", stats.total_connections, stats.active_connections, stats.total_streams, stats.active_streams, stats.total_upstream_connections, stats.active_upstream_connections, stats.sent_bytes, stats.received_bytes);
+        info!("Stats: TC={},AC={},TS={},AS={},TUC={},AUC={},SENT={},RECV={}", 
+            stats.total_connections, 
+            stats.active_connections, 
+            stats.total_streams, 
+            stats.active_streams, 
+            stats.total_upstream_connections, 
+            stats.active_upstream_connections, 
+            bytes_str(stats.sent_bytes), 
+            bytes_str(stats.received_bytes));
     }
 }

@@ -5,7 +5,7 @@ use rand::Rng;
 use std::{net::SocketAddr, time::Duration};
 use tokio::net::{TcpListener, TcpStream, lookup_host};
 
-use crate::util::{self, ConnectionId, read_length_prefixed};
+use crate::util::{self, ConnectionId, bytes_str, read_length_prefixed};
 use crate::messages;
 use crate::client_stats::{self, ClientStatsClone};
 
@@ -56,7 +56,6 @@ pub async fn connect_quic_server(endpoint: quinn::Endpoint, server_address: &str
 pub async fn run_client(mut tcp_listener: TcpListener, target_address: String, endpoint: quinn::Endpoint, server_address: String) {
     info!("client started main loop for target address: {}. Listening on: {}", target_address, tcp_listener.local_addr().unwrap());
     let mut loop_counter:usize = 0;
-    tokio::spawn(print_client_stats());
     loop {
         loop_counter += 1;
         if loop_counter > 1 {
@@ -184,10 +183,18 @@ async fn handle_client_connection_loop(connection_id: ConnectionId, tcp_listener
     }
 }
 
-async fn print_client_stats() {
+pub async fn print_client_stats() {
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
         let stats = ClientStatsClone::get();
-        info!("client stats: total connections: {}, active connections: {}, total streams: {}, active streams: {}, total client connections: {}, active client connections: {}, sent bytes: {}, received bytes: {}", stats.total_connections, stats.active_connections, stats.total_streams, stats.active_streams, stats.total_client_connections, stats.active_client_connections, stats.total_sent_bytes, stats.total_received_bytes);
+        info!("Stats: TC={},AC={},TS={},AS={},TCC={},ACC={},SENT={},RECV={}", 
+            stats.total_connections, 
+            stats.active_connections, 
+            stats.total_streams, 
+            stats.active_streams, 
+            stats.total_client_connections, 
+            stats.active_client_connections, 
+            bytes_str(stats.total_sent_bytes), 
+            bytes_str(stats.total_received_bytes));
     }
 }
