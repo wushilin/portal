@@ -33,45 +33,47 @@ fn get_server_name(server_address: &str) -> String {
     return server_address[..tokens.unwrap()].to_string();
 }
 
+pub async fn connect_quic_server(endpoint: quinn::Endpoint, server_address: &str) -> Result<quinn::Connection> {
+    let addrs= lookup_server_address(server_address).await;
+    if addrs.is_empty() {
+        error!("Client failed to lookup server address: {}", server_address);
+        return Err(anyhow::anyhow!("Client failed to lookup server address: {}", server_address));
+    }
+    let random_addr = addrs[rand::rng().random_range(0..addrs.len())];
+    let server_name = get_server_name(&server_address);
+    let connection = endpoint.connect(random_addr, &server_name);
+    match connection {
+        Ok(connection) => {
+            return Ok(connection.await?);
+        },
+        Err(e) => {
+            error!("Client failed to connect to QUIC server: {}", e);
+            return Err(anyhow::anyhow!("Client failed to connect to QUIC server: {}", e));
+        }
+    }
+}
+
 pub async fn run_client(mut tcp_listener: TcpListener, target_address: String, endpoint: quinn::Endpoint, server_address: String) {
-    info!("Client started main loop for target address: {}. Listening on: {}", target_address, tcp_listener.local_addr().unwrap());
+    info!("client started main loop for target address: {}. Listening on: {}", target_address, tcp_listener.local_addr().unwrap());
     let mut loop_counter:usize = 0;
     tokio::spawn(print_client_stats());
     loop {
         loop_counter += 1;
         if loop_counter > 1 {
-            info!("Client sleeping for 5 seconds before retrying");
+            info!("client sleeping for 5 seconds before retrying");
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
-        let addrs= lookup_server_address(&server_address).await;
-        if addrs.is_empty() {
-            error!("Client failed to lookup server address: {}", server_address);
+        let connection = connect_quic_server(endpoint.clone(), &server_address).await;
+        if connection.is_err() {
+            error!("client failed to connect to QUIC server due to: {}", connection.err().unwrap());
             continue;
         }
-        let random_addr = addrs[rand::rng().random_range(0..addrs.len())];
-        let server_name = get_server_name(&server_address);
-        let connection = endpoint.connect(random_addr, &server_name);
-        match connection {
-            Ok(connection) => {
-                let conection = connection.await;
-                match conection {
-                    Ok(connection) => {
-                        info!("Client connected to server: {:?}", random_addr);
-                        let connection_id:ConnectionId = Default::default();
-                        client_stats::increment_active_connections();
-                        let _ = handle_server_connection( connection_id,&mut tcp_listener, target_address.clone(), connection).await;
-                        client_stats::decrement_active_connections();
-                        info!("ended: connection closed");
-                    }
-                    Err(e) => {
-                        error!("Client failed to connect to QUIC server(1): {:?} due to {}", random_addr, e);
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Client failed to connect to QUIC server(2): {:?} due to {}", random_addr, e);
-            }
-        }
+
+        let connection = connection.unwrap();
+        let connection_id:ConnectionId = Default::default();
+        client_stats::increment_active_connections();
+        let _ = handle_server_connection( connection_id, &mut tcp_listener, target_address.clone(), connection).await;
+        client_stats::decrement_active_connections();
     }
 }
 
