@@ -139,20 +139,13 @@ async fn handle_client_connection(connection_id: ConnectionId, tcp_stream: TcpSt
             client_stats::increment_active_client_connections();
             client_stats::increment_active_streams();
             info!("{} spawning pipe to forward data between TCP and QUIC streams", stream_id);
-            let result = util::run_pipe(
+            let (total_copied1, total_copied2) = util::run_pipe(
                 (tcpr, tcpw), 
             (quic_recv_stream, quic_send_stream),
             client_stats::get_total_received_bytes_counter(),
             client_stats::get_total_sent_bytes_counter(),
             ).await;
-            match result {
-                Ok((total_copied1, total_copied2)) => {
-                    info!("{} connection closed. total copied bytes: TCP -> QUIC: {}, QUIC -> TCP: {}", stream_id, total_copied1, total_copied2);
-                }
-                Err(e) => {
-                    error!("{} connection failed: {}", stream_id, e);
-                }
-            }
+            info!("{} connection closed. total copied bytes: TCP -> QUIC: {}, QUIC -> TCP: {}", stream_id, total_copied1, total_copied2);
             client_stats::decrement_active_client_connections();
             client_stats::decrement_active_streams();
         }

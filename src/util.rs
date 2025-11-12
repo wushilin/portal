@@ -70,7 +70,7 @@ where
     Ok(total_copied)
 }
 
-pub async fn run_pipe<R1, W1, R2, W2>(stream1: (R1, W1), stream2: (R2, W2), r1_to_w2: Arc<AtomicUsize>, r2_to_w1: Arc<AtomicUsize>) -> Result<(usize, usize)>
+pub async fn run_pipe<R1, W1, R2, W2>(stream1: (R1, W1), stream2: (R2, W2), r1_to_w2: Arc<AtomicUsize>, r2_to_w1: Arc<AtomicUsize>) -> (usize, usize)
 where
     R1: AsyncRead + Unpin + Send + Sync,
     W1: AsyncWrite + Unpin + Send + Sync,
@@ -89,7 +89,7 @@ where
         result = async_copy1.copy(&r1_to_w2) => result,
         result = async_copy2.copy(&r2_to_w1) => result,
     );
-    return Ok((local_copy1.load(Ordering::Relaxed), local_copy2.load(Ordering::Relaxed)));
+    return (local_copy1.load(Ordering::Relaxed), local_copy2.load(Ordering::Relaxed));
 }
 
 fn next_connection_id() -> u64 {
