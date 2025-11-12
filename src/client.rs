@@ -135,6 +135,8 @@ async fn handle_client_connection(connection_id: ConnectionId, tcp_stream: TcpSt
     }
     tokio::spawn(
         async move {
+            client_stats::increment_active_client_connections();
+            client_stats::increment_active_streams();
             info!("{} spawning pipe to forward data between TCP and QUIC streams", stream_id);
             let result = util::run_pipe(
                 (tcpr, tcpw), 
@@ -150,6 +152,8 @@ async fn handle_client_connection(connection_id: ConnectionId, tcp_stream: TcpSt
                     error!("{} connection failed: {}", stream_id, e);
                 }
             }
+            client_stats::decrement_active_client_connections();
+            client_stats::decrement_active_streams();
         }
     );
     Ok(())
@@ -165,11 +169,7 @@ async fn handle_client_connection_loop(connection_id: ConnectionId, tcp_listener
         let mut connection_clone = connection.clone();
         let bi_stream = my_open_bi(&mut connection_clone).await?;
         tokio::spawn(async move {
-            client_stats::increment_active_client_connections();
-            client_stats::increment_active_streams();
             let result = handle_client_connection(connection_id_clone, tcp_stream, target_address_clone, bi_stream).await;
-            client_stats::decrement_active_client_connections();
-            client_stats::decrement_active_streams();
             match result {
                 Ok(()) => {
                     info!("{} connection closed", connection_id_clone2);
