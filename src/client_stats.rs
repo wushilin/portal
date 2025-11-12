@@ -1,6 +1,7 @@
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 use lazy_static::lazy_static;
+use tracing::info;
 
 lazy_static! {
     static ref CLIENT_STATS: Arc<ClientStats> = Arc::new(ClientStats::new());
@@ -87,10 +88,12 @@ fn increment_total_streams() {
 
 pub fn increment_active_streams() {
     increment_total_streams();
+    info!("Increasing active streams");
     CLIENT_STATS.active_streams.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn decrement_active_streams() {
+    info!("Decreasing active streams");
     CLIENT_STATS.active_streams.fetch_sub(1, Ordering::Relaxed);
 }
 

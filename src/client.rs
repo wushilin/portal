@@ -157,7 +157,8 @@ async fn handle_client_connection(connection_id: ConnectionId, tcp_stream: TcpSt
 
 async fn handle_client_connection_loop(connection_id: ConnectionId, tcp_listener: &mut TcpListener, target_address: String,  connection: quinn::Connection) -> Result<()> {
     loop {
-        let (tcp_stream, _) = tcp_listener.accept().await?;
+        let (tcp_stream, socket_addr) = tcp_listener.accept().await?;
+        info!("{} accepted tcp connection from {:?}", connection_id, socket_addr);
         let connection_id_clone = connection_id.clone();
         let connection_id_clone2 = connection_id_clone.clone();
         let target_address_clone = target_address.clone();
