@@ -110,10 +110,10 @@ async fn my_open_bi(connection: &mut quinn::Connection) -> Result<(SendStream, R
     Ok((send_stream, recv_stream))
 }
 
-async fn handle_client_connection(connection_id: ConnectionId, tcp_stream: TcpStream, target_address: String,  mut connection: quinn::Connection) -> Result<()> {
+async fn handle_client_connection(connection_id: ConnectionId, tcp_stream: TcpStream, target_address: String,  bi_stream: (SendStream, RecvStream)) -> Result<()> {
     info!("{} accepted tcp stream from {:?}", connection_id, tcp_stream.peer_addr()?);
     let (tcpr, tcpw) = tcp_stream.into_split();
-    let (mut quic_send_stream, mut quic_recv_stream) = my_open_bi(&mut connection).await?;
+    let (mut quic_send_stream, mut quic_recv_stream) = bi_stream;
     let stream_id = connection_id.next_stream_id();
     info!("{} opened QUIC bi stream with server: {}", connection_id, stream_id);
     let request = messages::build_connect_request(&target_address);
@@ -161,11 +161,12 @@ async fn handle_client_connection_loop(connection_id: ConnectionId, tcp_listener
         let connection_id_clone = connection_id.clone();
         let connection_id_clone2 = connection_id_clone.clone();
         let target_address_clone = target_address.clone();
-        let connection_clone = connection.clone();
+        let mut connection_clone = connection.clone();
+        let bi_stream = my_open_bi(&mut connection_clone).await?;
         tokio::spawn(async move {
             client_stats::increment_active_client_connections();
             client_stats::increment_active_streams();
-            let result = handle_client_connection(connection_id_clone, tcp_stream, target_address_clone, connection_clone).await;
+            let result = handle_client_connection(connection_id_clone, tcp_stream, target_address_clone, bi_stream).await;
             client_stats::decrement_active_client_connections();
             client_stats::decrement_active_streams();
             match result {
