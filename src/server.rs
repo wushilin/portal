@@ -124,8 +124,8 @@ async fn handle_server_stream_inner(stream_id: StreamId, stream: (SendStream, Re
     let (read_tcp, write_tcp) = tcp_stream.into_split();
     info!("{} starting pipe to copy data between client and upstream", stream_id);
     let result = util::run_pipe((read, write), (read_tcp, write_tcp), 
-    server_stats::get_sent_bytes_counter(), 
-    server_stats::get_received_bytes_counter()).await;
+    server_stats::get_received_bytes_counter(), 
+    server_stats::get_sent_bytes_counter()).await;
     match result {
         Ok((total_copied1, total_copied2)) => {
             info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
