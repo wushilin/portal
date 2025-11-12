@@ -61,7 +61,7 @@ pub fn increment_active_connections() {
 }
 
 pub fn decrement_active_connections() {
-    SERVER_STATS.total_connections.fetch_sub(1, Ordering::Relaxed);
+    SERVER_STATS.active_connections.fetch_sub(1, Ordering::Relaxed);
 }
 
 fn increment_total_streams() {
