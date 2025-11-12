@@ -48,6 +48,7 @@ async fn handle_server_connection(incoming: quinn::Incoming) {
 async fn handle_server_connection_inner(
     connection_id: ConnectionId, 
     mut connection: quinn::Connection) {
+    info!("{} connection handle loop started", connection_id);
     let keep_alive_stream = my_accept_bi(&mut connection).await;
     match keep_alive_stream {
         Ok((send_stream, recv_stream)) => {
@@ -65,6 +66,7 @@ async fn handle_server_connection_inner(
                 let stream_id = connection_id.next_stream_id();
                 info!("{} accepted stream {}", connection_id, stream_id);
                 tokio::spawn(async move {
+                    info!("{} spawning stream handle loop", stream_id);
                     server_stats::increment_active_streams();
                     server_stats::increment_active_upstream_connections();
                     let result = handle_server_stream_inner( stream_id.clone(), stream).await;
@@ -72,12 +74,12 @@ async fn handle_server_connection_inner(
                     server_stats::decrement_active_upstream_connections();
                     match result {
                         Ok(()) => {
-                            info!("{} stream closed", stream_id);
                         }
                         Err(e) => {
-                            error!("{} stream closed with error: {}", stream_id, e);
+                            error!("{} stream handle error: {}", stream_id, e);
                         }
                     }
+                    info!("{} stream handle loop ended", stream_id);
                 });
             }
             Err(e) => {
@@ -86,6 +88,7 @@ async fn handle_server_connection_inner(
             }
         }
     }
+    info!("{} connection handle loop ended", connection_id);
 }
 
 
@@ -105,7 +108,7 @@ async fn handle_server_stream_inner(stream_id: StreamId, stream: (SendStream, Re
     let target_address = String::from_utf8(buffer[..n].to_vec()).unwrap();
     info!("{} read target address: {:?}", stream_id, target_address);
 
-    let tcp_stream = TcpStream::connect(target_address).await;
+    let tcp_stream = TcpStream::connect(&target_address).await;
     if tcp_stream.is_err() {
         let err = tcp_stream.err().unwrap();
         error!("{} failed to connect to target address: {}", stream_id, err);
@@ -116,26 +119,24 @@ async fn handle_server_stream_inner(stream_id: StreamId, stream: (SendStream, Re
     let tcp_stream = tcp_stream.unwrap();
     let response = messages::build_connect_response(true);
     write.write_all(&response).await?;
+    info!("{} connected to target address: {}", stream_id, target_address);
 
     let (read_tcp, write_tcp) = tcp_stream.into_split();
-    let join_handle = tokio::spawn(async move {
-        info!("{} spawning pipe to copy data between client and upstream", stream_id);
-        let result = util::run_pipe((read, write), (read_tcp, write_tcp), 
-        server_stats::get_sent_bytes_counter(), 
-        server_stats::get_received_bytes_counter()).await;
-        match result {
-            Ok((total_copied1, total_copied2)) => {
-                info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
-                    stream_id,
-                    total_copied1, total_copied2);
-            }
-            Err(e) => {
-                error!("{} stream error {}", stream_id, e);
-            }
+    info!("{} starting pipe to copy data between client and upstream", stream_id);
+    let result = util::run_pipe((read, write), (read_tcp, write_tcp), 
+    server_stats::get_sent_bytes_counter(), 
+    server_stats::get_received_bytes_counter()).await;
+    match result {
+        Ok((total_copied1, total_copied2)) => {
+            info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
+                stream_id,
+                total_copied1, total_copied2);
         }
-        info!("{} stream closed", stream_id);
-    });
-    let _ = join_handle.await;
+        Err(e) => {
+            error!("{} stream error {}", stream_id, e);
+        }
+    }
+    info!("{} stream closed", stream_id);
     Ok(())
 }
 
