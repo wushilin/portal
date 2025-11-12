@@ -70,7 +70,7 @@ where
     Ok(total_copied)
 }
 
-pub async fn run_pipe<R1, W1, R2, W2>(stream1: (R1, W1), stream2: (R2, W2), r1_to_w2: Arc<AtomicUsize>, r2_to_w1: Arc<AtomicUsize>) -> Result<()>
+pub async fn run_pipe<R1, W1, R2, W2>(stream1: (R1, W1), stream2: (R2, W2), r1_to_w2: Arc<AtomicUsize>, r2_to_w1: Arc<AtomicUsize>) -> Result<(usize, usize)>
 where
     R1: AsyncRead + Unpin + Send + Sync,
     W1: AsyncWrite + Unpin + Send + Sync,
@@ -88,7 +88,7 @@ where
     if join_result.is_err() {
         return Err(join_result.unwrap_err());
     }
-    Ok(())
+    return Ok(join_result.unwrap());
 }
 
 fn next_connection_id() -> u64 {
@@ -186,8 +186,9 @@ impl<R, W> AsyncCopy<R, W> where R: AsyncRead + Unpin, W: AsyncWrite + Unpin {
         Self { read, write }
     }
 
-    pub async fn copy(&mut self, progress:Arc<AtomicUsize>) -> Result<()> {
+    pub async fn copy(&mut self, progress:Arc<AtomicUsize>) -> Result<usize> {
         let mut buf = vec![0u8; 4096];
+        let mut total_copied = 0;
         loop {
             let n = self.read.read(&mut buf).await?;
             if n == 0 {
@@ -197,7 +198,8 @@ impl<R, W> AsyncCopy<R, W> where R: AsyncRead + Unpin, W: AsyncWrite + Unpin {
                 break;
             }
             progress.fetch_add(n, Ordering::Relaxed);
+            total_copied += n;
         }
-        Ok(())
+        Ok(total_copied)
     }
 }

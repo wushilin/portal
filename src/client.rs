@@ -2,8 +2,6 @@ use tracing::{debug, error, info};
 use anyhow::Result;
 use quinn::{RecvStream, SendStream};
 use rand::Rng;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{net::SocketAddr, time::Duration};
 use tokio::net::{TcpListener, TcpStream, lookup_host};
 
@@ -138,26 +136,20 @@ async fn handle_client_connection(connection_id: ConnectionId, tcp_stream: TcpSt
     tokio::spawn(
         async move {
             info!("{} spawning pipe to forward data between TCP and QUIC streams", stream_id);
-            let tcp_to_quic_counter = Arc::new(AtomicUsize::new(0));
-            let quic_to_tcp_counter = Arc::new(AtomicUsize::new(0));
             let result = util::run_pipe(
                 (tcpr, tcpw), 
             (quic_recv_stream, quic_send_stream),
-            tcp_to_quic_counter.clone(),
-            quic_to_tcp_counter.clone(),
+            client_stats::get_total_received_bytes_counter(),
+            client_stats::get_total_sent_bytes_counter(),
             ).await;
             match result {
-                Ok(()) => {
+                Ok((total_copied1, total_copied2)) => {
+                    info!("{} connection closed. total copied bytes: TCP -> QUIC: {}, QUIC -> TCP: {}", stream_id, total_copied1, total_copied2);
                 }
                 Err(e) => {
                     error!("{} connection failed: {}", stream_id, e);
                 }
             }
-            let total_copied1 = tcp_to_quic_counter.load(Ordering::Relaxed);
-            let total_copied2 = quic_to_tcp_counter.load(Ordering::Relaxed);
-            client_stats::increment_total_sent_bytes(total_copied1);
-            client_stats::increment_total_received_bytes(total_copied2);
-            info!("{} connection closed. total copied bytes: TCP -> QUIC: {}, QUIC -> TCP: {}", stream_id, total_copied1, total_copied2);
         }
     );
     Ok(())
@@ -190,7 +182,7 @@ async fn handle_client_connection_loop(connection_id: ConnectionId, tcp_listener
 
 async fn print_client_stats() {
     loop {
-        tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
         let stats = ClientStatsClone::get();
         info!("client stats: total connections: {}, active connections: {}, total streams: {}, active streams: {}, total client connections: {}, active client connections: {}, sent bytes: {}, received bytes: {}", stats.total_connections, stats.active_connections, stats.total_streams, stats.active_streams, stats.total_client_connections, stats.active_client_connections, stats.total_sent_bytes, stats.total_received_bytes);
     }

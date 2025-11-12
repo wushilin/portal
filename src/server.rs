@@ -1,6 +1,3 @@
-use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use tracing::{debug, error, info};
@@ -69,8 +66,10 @@ async fn handle_server_connection_inner(
                 info!("{} accepted stream {}", connection_id, stream_id);
                 tokio::spawn(async move {
                     server_stats::increment_active_streams();
+                    server_stats::increment_active_upstream_connections();
                     let result = handle_server_stream_inner( stream_id.clone(), stream).await;
                     server_stats::decrement_active_streams();
+                    server_stats::decrement_active_upstream_connections();
                     match result {
                         Ok(()) => {
                             info!("{} stream closed", stream_id);
@@ -121,22 +120,14 @@ async fn handle_server_stream_inner(stream_id: StreamId, stream: (SendStream, Re
     let (read_tcp, write_tcp) = tcp_stream.into_split();
     let join_handle = tokio::spawn(async move {
         info!("{} spawning pipe to copy data between client and upstream", stream_id);
-        let client_to_upstream_counter = Arc::new(AtomicUsize::new(0));
-        let upstream_to_client_counter = Arc::new(AtomicUsize::new(0));
-        server_stats::increment_active_upstream_connections();
         let result = util::run_pipe((read, write), (read_tcp, write_tcp), 
-        client_to_upstream_counter.clone(), 
-        upstream_to_client_counter.clone()).await;
-        server_stats::decrement_active_upstream_connections();
-        let total_copied1 = client_to_upstream_counter.load(Ordering::Relaxed);
-        let total_copied2 = upstream_to_client_counter.load(Ordering::Relaxed);
-        server_stats::increment_received_bytes(total_copied1);
-        server_stats::increment_sent_bytes(total_copied2);
-        info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
-                stream_id,
-                total_copied1, total_copied2);
+        server_stats::get_sent_bytes_counter(), 
+        server_stats::get_received_bytes_counter()).await;
         match result {
-            Ok(()) => {
+            Ok((total_copied1, total_copied2)) => {
+                info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
+                    stream_id,
+                    total_copied1, total_copied2);
             }
             Err(e) => {
                 error!("{} stream error {}", stream_id, e);
@@ -177,7 +168,7 @@ async fn my_accept_bi(connection: &mut quinn::Connection) -> Result<(SendStream,
 
 async fn print_server_stats() {
     loop {
-        tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
         let stats = ServerStatsClone::get();
         info!("server stats: total connections: {}, active connections: {}, total streams: {}, active streams: {}, total upstream connections: {}, active upstream connections: {}, sent bytes: {}, received bytes: {}", stats.total_connections, stats.active_connections, stats.total_streams, stats.active_streams, stats.total_upstream_connections, stats.active_upstream_connections, stats.sent_bytes, stats.received_bytes);
     }

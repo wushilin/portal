@@ -13,8 +13,8 @@ struct ClientStats {
     active_streams: AtomicUsize,
     total_connections: AtomicUsize,
     active_connections: AtomicUsize,
-    total_sent_bytes: AtomicUsize,
-    total_received_bytes: AtomicUsize,
+    total_sent_bytes: Arc<AtomicUsize>,
+    total_received_bytes: Arc<AtomicUsize>,
 }
 
 pub struct ClientStatsClone {
@@ -37,8 +37,8 @@ impl ClientStats {
             total_streams: AtomicUsize::new(0),
             active_connections: AtomicUsize::new(0),
             active_streams: AtomicUsize::new(0),
-            total_sent_bytes: AtomicUsize::new(0),
-            total_received_bytes: AtomicUsize::new(0),
+            total_sent_bytes: Arc::new(AtomicUsize::new(0)),
+            total_received_bytes: Arc::new(AtomicUsize::new(0)),
             active_client_connections: AtomicUsize::new(0),
             total_client_connections: AtomicUsize::new(0),
         }
@@ -60,6 +60,13 @@ impl ClientStatsClone {
     }
 }
 
+pub fn get_total_sent_bytes_counter() -> Arc<AtomicUsize> {
+    Arc::clone(&CLIENT_STATS.total_sent_bytes)
+}
+
+pub fn get_total_received_bytes_counter() -> Arc<AtomicUsize> {
+    Arc::clone(&CLIENT_STATS.total_received_bytes)
+}
 
 fn increment_total_connections() {
     CLIENT_STATS.total_connections.fetch_add(1, Ordering::Relaxed);
@@ -85,14 +92,6 @@ pub fn increment_active_streams() {
 
 pub fn decrement_active_streams() {
     CLIENT_STATS.active_streams.fetch_sub(1, Ordering::Relaxed);
-}
-
-pub fn increment_total_sent_bytes(bytes: usize) {
-    CLIENT_STATS.total_sent_bytes.fetch_add(bytes, Ordering::Relaxed);
-}
-
-pub fn increment_total_received_bytes(bytes: usize) {
-    CLIENT_STATS.total_received_bytes.fetch_add(bytes, Ordering::Relaxed);
 }
 
 fn increment_total_client_connections() {

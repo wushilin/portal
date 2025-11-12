@@ -13,8 +13,8 @@ struct ServerStats {
     active_streams: AtomicUsize,
     total_upstream_connections: AtomicUsize,
     active_upstream_connections: AtomicUsize,
-    sent_bytes: AtomicUsize,
-    received_bytes: AtomicUsize,
+    sent_bytes: Arc<AtomicUsize>,
+    received_bytes: Arc<AtomicUsize>,
 }
 
 pub struct ServerStatsClone {
@@ -37,10 +37,18 @@ impl ServerStats {
             active_streams: AtomicUsize::new(0),
             total_upstream_connections: AtomicUsize::new(0),
             active_upstream_connections: AtomicUsize::new(0),
-            sent_bytes: AtomicUsize::new(0),
-            received_bytes: AtomicUsize::new(0),
+            sent_bytes: Arc::new(AtomicUsize::new(0)),
+            received_bytes: Arc::new(AtomicUsize::new(0)),
         }
     }
+}
+
+pub fn get_sent_bytes_counter() -> Arc<AtomicUsize> {
+    Arc::clone(&SERVER_STATS.sent_bytes)
+}
+
+pub fn get_received_bytes_counter() -> Arc<AtomicUsize> {
+    Arc::clone(&SERVER_STATS.received_bytes)
 }
 
 fn increment_total_connections() {
@@ -80,14 +88,6 @@ pub fn increment_active_upstream_connections() {
 
 pub fn decrement_active_upstream_connections() {
     SERVER_STATS.active_upstream_connections.fetch_sub(1, Ordering::Relaxed);
-}
-
-pub fn increment_sent_bytes(bytes: usize) {
-    SERVER_STATS.sent_bytes.fetch_add(bytes, Ordering::Relaxed);
-}
-
-pub fn increment_received_bytes(bytes: usize) {
-    SERVER_STATS.received_bytes.fetch_add(bytes, Ordering::Relaxed);
 }
 
 impl ServerStatsClone {
