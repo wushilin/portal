@@ -81,14 +81,15 @@ where
     let (reader2, writer2) = stream2;
     let mut async_copy1 = AsyncCopy::new(reader1, writer2);
     let mut async_copy2 = AsyncCopy::new(reader2, writer1);
-    let join_result = tokio::try_join!(
-        async_copy1.copy(r1_to_w2),
-        async_copy2.copy(r2_to_w1),
+    let local_copy1 = Arc::new(AtomicUsize::new(0));
+    let local_copy2 = Arc::new(AtomicUsize::new(0));
+    let r1_to_w2 = vec![r1_to_w2, local_copy1.clone()];
+    let r2_to_w1 = vec![r2_to_w1, local_copy2.clone()];
+    let _ = tokio::select!(
+        result = async_copy1.copy(&r1_to_w2) => result,
+        result = async_copy2.copy(&r2_to_w1) => result,
     );
-    if join_result.is_err() {
-        return Err(join_result.unwrap_err());
-    }
-    return Ok(join_result.unwrap());
+    return Ok((local_copy1.load(Ordering::Relaxed), local_copy2.load(Ordering::Relaxed)));
 }
 
 fn next_connection_id() -> u64 {
@@ -186,7 +187,7 @@ impl<R, W> AsyncCopy<R, W> where R: AsyncRead + Unpin, W: AsyncWrite + Unpin {
         Self { read, write }
     }
 
-    pub async fn copy(&mut self, progress:Arc<AtomicUsize>) -> Result<usize> {
+    pub async fn copy(&mut self, progresses:&Vec<Arc<AtomicUsize>>) -> Result<usize> {
         let mut buf = vec![0u8; 4096];
         let mut total_copied = 0;
         loop {
@@ -197,7 +198,9 @@ impl<R, W> AsyncCopy<R, W> where R: AsyncRead + Unpin, W: AsyncWrite + Unpin {
             if self.write.write_all(&buf[..n]).await.is_err() {
                 break;
             }
-            progress.fetch_add(n, Ordering::Relaxed);
+            for progress in progresses {
+                progress.fetch_add(n, Ordering::Relaxed);
+            }
             total_copied += n;
         }
         Ok(total_copied)
