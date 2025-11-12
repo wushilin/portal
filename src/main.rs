@@ -8,9 +8,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::{net::SocketAddr};
 use tokio::{net::TcpListener, task::JoinHandle};
-use tokio_tree_context::Context;
 use tracing::{info};
-
+pub mod server_stats;
+pub mod client_stats;
 
 #[derive(Parser)]
 #[command(name = "portal")]
@@ -93,9 +93,8 @@ async fn main() -> Result<()> {
             
             let bind_addr: SocketAddr = format!("{}:{}", bind_addr, port).parse()?;
             let endpoint = quinn::Endpoint::server(server_config, bind_addr)?;
-            let context = Context::new();
             info!("Server listening on {}", bind_addr);
-            server::run_server(context, endpoint).await;
+            server::run_server(endpoint).await;
             info!("Server shutdown");
         }
         Commands::Client {
@@ -115,11 +114,10 @@ async fn main() -> Result<()> {
             
             let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
             endpoint.set_default_client_config(client_config);
-            let mut context = Context::new();
             let server_address = format!("{}:{}", server, port);
             let mut join_handles = Vec::new();
             for forward_spec in forward_spec {
-                let join_handle = run_client_one_forward_spec(&mut context, endpoint.clone(), server_address.clone(), forward_spec).await?;
+                let join_handle = run_client_one_forward_spec(endpoint.clone(), server_address.clone(), forward_spec).await?;
                 join_handles.push(join_handle);
             }
             for join_handle in join_handles {
@@ -131,7 +129,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-pub async fn run_client_one_forward_spec(context: &mut Context, endpoint: quinn::Endpoint, server_address: String, forward_spec: String) -> Result<JoinHandle<Option<()>>> {
+pub async fn run_client_one_forward_spec(endpoint: quinn::Endpoint, server_address: String, forward_spec: String) -> Result<JoinHandle<()>> {
     let tokens = forward_spec.split('@').collect::<Vec<&str>>();
     if tokens.len() != 2 {
         return Err(anyhow::anyhow!("invalid forward spec: {}", forward_spec));
@@ -140,8 +138,7 @@ pub async fn run_client_one_forward_spec(context: &mut Context, endpoint: quinn:
     let remote_host = tokens[1];
     let listener = TcpListener::bind(local_bind).await?;
     info!("listening on {} forwarding to remote host: {}", local_bind, remote_host);
-    let child_context = context.new_child_context();
-    let jh = context.spawn(client::run_client(child_context,  
+    let jh = tokio::spawn(client::run_client(
         listener, 
         remote_host.to_string(), 
         endpoint, server_address));

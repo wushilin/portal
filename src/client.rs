@@ -1,13 +1,15 @@
 use tracing::{debug, error, info};
-use tokio_tree_context::Context;
 use anyhow::Result;
 use quinn::{RecvStream, SendStream};
 use rand::Rng;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{net::SocketAddr, time::Duration};
-use tokio::net::{TcpListener, lookup_host};
+use tokio::net::{TcpListener, TcpStream, lookup_host};
 
 use crate::util::{self, ConnectionId, read_length_prefixed};
 use crate::messages;
+use crate::client_stats::{self, ClientStatsClone};
 
 async fn lookup_server_address(server_addr: &str) -> Vec<SocketAddr> {
     let addrs_result = lookup_host(&server_addr).await;
@@ -33,9 +35,10 @@ fn get_server_name(server_address: &str) -> String {
     return server_address[..tokens.unwrap()].to_string();
 }
 
-pub async fn run_client(mut context: Context, mut tcp_listener: TcpListener, target_address: String, endpoint: quinn::Endpoint, server_address: String) {
+pub async fn run_client(mut tcp_listener: TcpListener, target_address: String, endpoint: quinn::Endpoint, server_address: String) {
     info!("Client started main loop for target address: {}. Listening on: {}", target_address, tcp_listener.local_addr().unwrap());
     let mut loop_counter:usize = 0;
+    tokio::spawn(print_client_stats());
     loop {
         loop_counter += 1;
         if loop_counter > 1 {
@@ -57,9 +60,10 @@ pub async fn run_client(mut context: Context, mut tcp_listener: TcpListener, tar
                     Ok(connection) => {
                         info!("Client connected to server: {:?}", random_addr);
                         let connection_id:ConnectionId = Default::default();
-                        let child_context = context.new_child_context();
-                        let _ = handle_client_connection(child_context, connection_id,&mut tcp_listener, target_address.clone(), connection).await;
-                        info!("handle_client_connection ended: connection closed");
+                        client_stats::increment_active_connections();
+                        let _ = handle_server_connection( connection_id,&mut tcp_listener, target_address.clone(), connection).await;
+                        client_stats::decrement_active_connections();
+                        info!("ended: connection closed");
                     }
                     Err(e) => {
                         error!("Client failed to connect to QUIC server(1): {:?} due to {}", random_addr, e);
@@ -73,12 +77,12 @@ pub async fn run_client(mut context: Context, mut tcp_listener: TcpListener, tar
     }
 }
 
-async fn handle_client_connection(mut context: Context, connection_id: ConnectionId, tcp_listener: &mut TcpListener, target_address: String, mut connection: quinn::Connection) {
+async fn handle_server_connection(connection_id: ConnectionId, tcp_listener: &mut TcpListener, target_address: String, mut connection: quinn::Connection) {
     let keep_alive_stream = my_open_bi(&mut connection).await;
     match keep_alive_stream {
         Ok((send_stream, recv_stream)) => {
             info!("{} Client starting keep alive stream...", connection_id);
-            context.spawn(util::keep_alive(recv_stream, send_stream, None));
+            tokio::spawn(util::keep_alive(recv_stream, send_stream, None));
         }
         Err(e) => {
             error!("{} Client failed to open keep alive stream: {}", connection_id, e);
@@ -87,7 +91,7 @@ async fn handle_client_connection(mut context: Context, connection_id: Connectio
     }
 
     let connection_id_clone = connection_id.clone();
-    let result = handle_client_connection_loop(context, connection_id, tcp_listener, target_address, connection).await;
+    let result = handle_client_connection_loop(connection_id, tcp_listener, target_address, connection).await;
     match result {
         Ok(()) => {
             info!("{} connection closed", connection_id_clone);
@@ -108,45 +112,86 @@ async fn my_open_bi(connection: &mut quinn::Connection) -> Result<(SendStream, R
     Ok((send_stream, recv_stream))
 }
 
-async fn handle_client_connection_loop(mut context: Context, connection_id: ConnectionId, tcp_listener: &mut TcpListener, target_address: String,  mut connection: quinn::Connection) -> Result<()> {
-    loop {
-        let (tcp_stream, _) = tcp_listener.accept().await?;
-        info!("{} accepted tcp stream from {:?}", connection_id, tcp_stream.peer_addr()?);
-        let (tcpr, tcpw) = tcp_stream.into_split();
-        let (mut quic_send_stream, mut quic_recv_stream) = my_open_bi(&mut connection).await?;
-        let stream_id = connection_id.next_stream_id();
-        info!("{} opened QUIC bi stream with server: {}", connection_id, stream_id);
-        let request = messages::build_connect_request(&target_address);
-        info!("{} sending connection request to server, target address: {:?}", stream_id, target_address);
-        quic_send_stream.write_all(&request).await?;
-        let mut buffer = vec![0u8; 10];
-        let response = read_length_prefixed(&mut quic_recv_stream, &mut buffer).await?;
-        info!("{} server connect response received", stream_id);
-        if response < 1 {
-            error!("{} server connect response too short: response < 1", stream_id);
-            return Err(anyhow::anyhow!("{} server connect response too short: response < 1", stream_id));
+async fn handle_client_connection(connection_id: ConnectionId, tcp_stream: TcpStream, target_address: String,  mut connection: quinn::Connection) -> Result<()> {
+    info!("{} accepted tcp stream from {:?}", connection_id, tcp_stream.peer_addr()?);
+    let (tcpr, tcpw) = tcp_stream.into_split();
+    let (mut quic_send_stream, mut quic_recv_stream) = my_open_bi(&mut connection).await?;
+    let stream_id = connection_id.next_stream_id();
+    info!("{} opened QUIC bi stream with server: {}", connection_id, stream_id);
+    let request = messages::build_connect_request(&target_address);
+    info!("{} sending connection request to server, target address: {:?}", stream_id, target_address);
+    quic_send_stream.write_all(&request).await?;
+    let mut buffer = vec![0u8; 10];
+    let response = read_length_prefixed(&mut quic_recv_stream, &mut buffer).await?;
+    info!("{} server connect response received", stream_id);
+    if response < 1 {
+        error!("{} server connect response too short: response < 1", stream_id);
+        return Err(anyhow::anyhow!("{} server connect response too short: response < 1", stream_id));
+    } else {
+        let response_bytes = buffer[0];
+        if response_bytes == 0x00 {
+            info!("{} server connect successful.", stream_id);
         } else {
-            let response_bytes = buffer[0];
-            if response_bytes == 0x00 {
-                info!("{} server connect successful.", stream_id);
-            } else {
-                error!("{} server connect failed. Check server logs for details.", stream_id);
-                continue;
-            }
+            error!("{} server connect failed. Check server logs for details.", stream_id);
         }
-        info!("{} spawning pipe to forward data between TCP and QUIC streams", stream_id);
-        context.spawn(
-            async move {
-                let result = util::run_pipe((tcpr, tcpw), (quic_recv_stream, quic_send_stream)).await;
-                match result {
-                    Ok((total_copied1, total_copied2)) => {
-                        info!("{} connection closed. total copied bytes: TCP -> QUIC: {}, QUIC -> TCP: {}", stream_id, total_copied1, total_copied2);
-                    }
-                    Err(e) => {
-                        error!("{} connection failed: {}", stream_id, e);
-                    }
+    }
+    tokio::spawn(
+        async move {
+            info!("{} spawning pipe to forward data between TCP and QUIC streams", stream_id);
+            let tcp_to_quic_counter = Arc::new(AtomicUsize::new(0));
+            let quic_to_tcp_counter = Arc::new(AtomicUsize::new(0));
+            let result = util::run_pipe(
+                (tcpr, tcpw), 
+            (quic_recv_stream, quic_send_stream),
+            tcp_to_quic_counter.clone(),
+            quic_to_tcp_counter.clone(),
+            ).await;
+            match result {
+                Ok(()) => {
+                }
+                Err(e) => {
+                    error!("{} connection failed: {}", stream_id, e);
                 }
             }
-        );
+            let total_copied1 = tcp_to_quic_counter.load(Ordering::Relaxed);
+            let total_copied2 = quic_to_tcp_counter.load(Ordering::Relaxed);
+            client_stats::increment_total_sent_bytes(total_copied1);
+            client_stats::increment_total_received_bytes(total_copied2);
+            info!("{} connection closed. total copied bytes: TCP -> QUIC: {}, QUIC -> TCP: {}", stream_id, total_copied1, total_copied2);
+        }
+    );
+    Ok(())
+}
+
+async fn handle_client_connection_loop(connection_id: ConnectionId, tcp_listener: &mut TcpListener, target_address: String,  connection: quinn::Connection) -> Result<()> {
+    loop {
+        let (tcp_stream, _) = tcp_listener.accept().await?;
+        let connection_id_clone = connection_id.clone();
+        let connection_id_clone2 = connection_id_clone.clone();
+        let target_address_clone = target_address.clone();
+        let connection_clone = connection.clone();
+        tokio::spawn(async move {
+            client_stats::increment_active_client_connections();
+            client_stats::increment_active_streams();
+            let result = handle_client_connection(connection_id_clone, tcp_stream, target_address_clone, connection_clone).await;
+            client_stats::decrement_active_client_connections();
+            client_stats::decrement_active_streams();
+            match result {
+                Ok(()) => {
+                    info!("{} connection closed", connection_id_clone2);
+                }
+                Err(e) => {
+                    error!("{} failed to handle connection: {}", connection_id_clone2, e);
+                }
+            }
+        });
+    }
+}
+
+async fn print_client_stats() {
+    loop {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        let stats = ClientStatsClone::get();
+        info!("client stats: total connections: {}, active connections: {}, total streams: {}, active streams: {}, total client connections: {}, active client connections: {}, sent bytes: {}, received bytes: {}", stats.total_connections, stats.active_connections, stats.total_streams, stats.active_streams, stats.total_client_connections, stats.active_client_connections, stats.total_sent_bytes, stats.total_received_bytes);
     }
 }

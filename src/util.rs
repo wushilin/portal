@@ -2,7 +2,8 @@ use anyhow::Result;
 use lazy_static::lazy_static;
 use tokio::time::MissedTickBehavior;
 use std::fmt::{self, Display};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 lazy_static! {
@@ -69,7 +70,7 @@ where
     Ok(total_copied)
 }
 
-pub async fn run_pipe<R1, W1, R2, W2>(stream1: (R1, W1), stream2: (R2, W2)) -> Result<(usize, usize)>
+pub async fn run_pipe<R1, W1, R2, W2>(stream1: (R1, W1), stream2: (R2, W2), r1_to_w2: Arc<AtomicUsize>, r2_to_w1: Arc<AtomicUsize>) -> Result<()>
 where
     R1: AsyncRead + Unpin + Send + Sync,
     W1: AsyncWrite + Unpin + Send + Sync,
@@ -78,15 +79,16 @@ where
 {
     let (reader1, writer1) = stream1;
     let (reader2, writer2) = stream2;
+    let mut async_copy1 = AsyncCopy::new(reader1, writer2);
+    let mut async_copy2 = AsyncCopy::new(reader2, writer1);
     let join_result = tokio::try_join!(
-        run_pipe_one_way(reader1, writer2),
-        run_pipe_one_way(reader2, writer1)
+        async_copy1.copy(r1_to_w2),
+        async_copy2.copy(r2_to_w1),
     );
     if join_result.is_err() {
         return Err(join_result.unwrap_err());
     }
-    let (total_copied1, total_copied2) = join_result.unwrap();
-    Ok((total_copied1, total_copied2))
+    Ok(())
 }
 
 fn next_connection_id() -> u64 {
@@ -170,5 +172,32 @@ where
             write.write_all(&payload).await?;
             read.read_exact(&mut buf).await?;
         }
+    }
+}
+
+
+pub struct AsyncCopy<R, W> where R: AsyncRead + Unpin, W: AsyncWrite + Unpin {
+    read:  R,
+    write: W,
+}
+
+impl<R, W> AsyncCopy<R, W> where R: AsyncRead + Unpin, W: AsyncWrite + Unpin {
+    pub fn new(read: R, write: W) -> Self {
+        Self { read, write }
+    }
+
+    pub async fn copy(&mut self, progress:Arc<AtomicUsize>) -> Result<()> {
+        let mut buf = vec![0u8; 4096];
+        loop {
+            let n = self.read.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            if self.write.write_all(&buf[..n]).await.is_err() {
+                break;
+            }
+            progress.fetch_add(n, Ordering::Relaxed);
+        }
+        Ok(())
     }
 }

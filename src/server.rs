@@ -1,19 +1,25 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
 use tracing::{debug, error, info};
-use tokio_tree_context::Context;
+use crate::server_stats::ServerStatsClone;
 use crate::util::{self, ConnectionId, StreamId};
 use quinn::{RecvStream, SendStream};
 use tokio::net::TcpStream;
 use anyhow::Result;
 use crate::messages;
+use crate::server_stats;
 
-pub async fn run_server(mut context: Context, endpoint: quinn::Endpoint) {
+pub async fn run_server(endpoint: quinn::Endpoint) {
     info!("starting server main loop");
+    tokio::spawn(print_server_stats());
     loop {
         let incoming = endpoint.accept().await;
         match incoming {
             Some(incoming) => {
-                let child_context = context.new_child_context();
-                context.spawn(handle_server_connection(child_context, incoming));
+                tokio::spawn(handle_server_connection(incoming));
             }
             None => {
                 break;
@@ -23,15 +29,17 @@ pub async fn run_server(mut context: Context, endpoint: quinn::Endpoint) {
     info!("endpoint closed");
 }
 
-async fn handle_server_connection(context: Context, incoming: quinn::Incoming) {
+async fn handle_server_connection(incoming: quinn::Incoming) {
     let connection = incoming.await;
     match connection {
         Ok(connection) => {
             let connection_id: ConnectionId = Default::default();
             let connection_id_clone = connection_id.clone();
             info!("{} accepted from {}", connection_id, connection.remote_address());
-            handle_server_connection_inner(context, connection_id,connection).await;
-            info!("{} closed", connection_id_clone);
+            server_stats::increment_active_connections();
+            handle_server_connection_inner(connection_id,connection).await;
+            server_stats::decrement_active_connections();
+            info!("{} connection closed", connection_id_clone);
         }
         Err(e) => {
             info!("failed to accept connection due to ConnectionError: {}", e);
@@ -40,13 +48,13 @@ async fn handle_server_connection(context: Context, incoming: quinn::Incoming) {
     }
 }
 
-async fn handle_server_connection_inner(mut context: Context, 
+async fn handle_server_connection_inner(
     connection_id: ConnectionId, 
     mut connection: quinn::Connection) {
     let keep_alive_stream = my_accept_bi(&mut connection).await;
     match keep_alive_stream {
         Ok((send_stream, recv_stream)) => {
-            context.spawn(util::keep_alive(recv_stream, send_stream, None));
+            tokio::spawn(util::keep_alive(recv_stream, send_stream, None));
         }
         Err(e) => {
             error!("{} failed to open keep alive stream: {}", connection_id, e);
@@ -59,8 +67,19 @@ async fn handle_server_connection_inner(mut context: Context,
             Ok(stream) => {
                 let stream_id = connection_id.next_stream_id();
                 info!("{} accepted stream {}", connection_id, stream_id);
-                let child_context = context.new_child_context();
-                context.spawn(handle_server_stream_inner(child_context, stream_id, stream));
+                tokio::spawn(async move {
+                    server_stats::increment_active_streams();
+                    let result = handle_server_stream_inner( stream_id.clone(), stream).await;
+                    server_stats::decrement_active_streams();
+                    match result {
+                        Ok(()) => {
+                            info!("{} stream closed", stream_id);
+                        }
+                        Err(e) => {
+                            error!("{} stream closed with error: {}", stream_id, e);
+                        }
+                    }
+                });
             }
             Err(e) => {
                 error!("{} failed to accept stream: {}", connection_id, e);
@@ -71,7 +90,7 @@ async fn handle_server_connection_inner(mut context: Context,
 }
 
 
-async fn handle_server_stream_inner(mut context: Context, stream_id: StreamId, stream: (SendStream, RecvStream)) ->Result<()> {
+async fn handle_server_stream_inner(stream_id: StreamId, stream: (SendStream, RecvStream)) ->Result<()> {
     info!("{} handling started", stream_id);
 
     let mut read = stream.1;
@@ -100,20 +119,30 @@ async fn handle_server_stream_inner(mut context: Context, stream_id: StreamId, s
     write.write_all(&response).await?;
 
     let (read_tcp, write_tcp) = tcp_stream.into_split();
-    let join_handle = context.spawn(async move {
+    let join_handle = tokio::spawn(async move {
         info!("{} spawning pipe to copy data between client and upstream", stream_id);
-        let result = util::run_pipe((read, write), (read_tcp, write_tcp)).await;
-        match result {
-            Ok((total_copied1, total_copied2)) => {
-                info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
+        let client_to_upstream_counter = Arc::new(AtomicUsize::new(0));
+        let upstream_to_client_counter = Arc::new(AtomicUsize::new(0));
+        server_stats::increment_active_upstream_connections();
+        let result = util::run_pipe((read, write), (read_tcp, write_tcp), 
+        client_to_upstream_counter.clone(), 
+        upstream_to_client_counter.clone()).await;
+        server_stats::decrement_active_upstream_connections();
+        let total_copied1 = client_to_upstream_counter.load(Ordering::Relaxed);
+        let total_copied2 = upstream_to_client_counter.load(Ordering::Relaxed);
+        server_stats::increment_received_bytes(total_copied1);
+        server_stats::increment_sent_bytes(total_copied2);
+        info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
                 stream_id,
                 total_copied1, total_copied2);
+        match result {
+            Ok(()) => {
             }
             Err(e) => {
-                error!("{} failed to copy data: {}", stream_id, e);
+                error!("{} stream error {}", stream_id, e);
             }
         }
-        info!("{} connection closed", stream_id);
+        info!("{} stream closed", stream_id);
     });
     let _ = join_handle.await;
     Ok(())
@@ -143,4 +172,13 @@ async fn my_accept_bi(connection: &mut quinn::Connection) -> Result<(SendStream,
             }
         }
     } 
+}
+
+
+async fn print_server_stats() {
+    loop {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        let stats = ServerStatsClone::get();
+        info!("server stats: total connections: {}, active connections: {}, total streams: {}, active streams: {}, total upstream connections: {}, active upstream connections: {}, sent bytes: {}, received bytes: {}", stats.total_connections, stats.active_connections, stats.total_streams, stats.active_streams, stats.total_upstream_connections, stats.active_upstream_connections, stats.sent_bytes, stats.received_bytes);
+    }
 }
