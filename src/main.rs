@@ -39,6 +39,9 @@ enum Commands {
         /// Port number
         #[arg(long, default_value = "1741", help = "server port number, the tunnel server will listen on this port for QUIC connections")]
         port: u16,
+
+        #[arg(short='i', help = "stats interval in seconds. default no stats", default_value = "60")]
+        stats_interval: usize,
     },
     /// Run the tunnel client
     Client {
@@ -60,6 +63,9 @@ enum Commands {
 
         #[arg(short='L', help = "forward spec in [0.0.0.0]:8080@remote_host:remote_port format")]
         forward_spec: Vec<String>,
+
+        #[arg(short='i', help = "stats interval in seconds. default no stats", default_value = "60")]
+        stats_interval: usize,
     },
 }
 
@@ -83,6 +89,7 @@ async fn main() -> Result<()> {
             key,
             bind_addr,
             port,
+            stats_interval,
         } => {
             let server_config = quicutil::build_server_config(
                 &ca_bundle,
@@ -94,7 +101,7 @@ async fn main() -> Result<()> {
             let bind_addr: SocketAddr = format!("{}:{}", bind_addr, port).parse()?;
             let endpoint = quinn::Endpoint::server(server_config, bind_addr)?;
             info!("Server listening on {}", bind_addr);
-            tokio::spawn(server::print_server_stats());
+            tokio::spawn(server::print_server_stats(stats_interval));
             server::run_server(endpoint).await;
             info!("Server shutdown");
         }
@@ -105,6 +112,7 @@ async fn main() -> Result<()> {
             server,
             port,
             forward_spec,
+            stats_interval,
         } => {
             let client_config = quicutil::build_client_config(
                 &ca_bundle,
@@ -116,7 +124,7 @@ async fn main() -> Result<()> {
             let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
             endpoint.set_default_client_config(client_config);
             let server_address = format!("{}:{}", server, port);
-            tokio::spawn(client::print_client_stats());
+            tokio::spawn(client::print_client_stats(stats_interval));
             let mut join_handles = Vec::new();
             for forward_spec in forward_spec {
                 let join_handle = run_client_one_forward_spec(endpoint.clone(), server_address.clone(), forward_spec).await?;

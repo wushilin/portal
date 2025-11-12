@@ -176,9 +176,12 @@ async fn handle_client_connection_loop(connection_id: ConnectionId, tcp_listener
     }
 }
 
-pub async fn print_client_stats() {
+pub async fn print_client_stats(stats_interval: usize) {
+    if stats_interval == 0 {
+        return;
+    }
     loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::time::sleep(Duration::from_secs(stats_interval as u64)).await;
         let stats = ClientStatsClone::get();
         info!("Stats: TC={},AC={},TS={},AS={},TCC={},ACC={},SENT={},RECV={}", 
             stats.total_connections, 

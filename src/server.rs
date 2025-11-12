@@ -11,7 +11,6 @@ use crate::server_stats;
 
 pub async fn run_server(endpoint: quinn::Endpoint) {
     info!("starting server main loop");
-    tokio::spawn(print_server_stats());
     loop {
         let incoming = endpoint.accept().await;
         match incoming {
@@ -160,9 +159,12 @@ async fn my_accept_bi(connection: &mut quinn::Connection) -> Result<(SendStream,
 }
 
 
-pub async fn print_server_stats() {
+pub async fn print_server_stats(stats_interval: usize) {
+    if stats_interval == 0 {
+        return;
+    }
     loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::time::sleep(Duration::from_secs(stats_interval as u64)).await;
         let stats = ServerStatsClone::get();
         info!("Stats: TC={},AC={},TS={},AS={},TUC={},AUC={},SENT={},RECV={}", 
             stats.total_connections, 
