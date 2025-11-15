@@ -7,7 +7,7 @@ use crate::util::{self, ConnectionId, Extendable, StreamId, bytes_str, write_str
 use quinn::{RecvStream, SendStream};
 use tokio::net::TcpStream;
 use anyhow::Result;
-use crate::messages;
+use crate::{aclutil, messages};
 use crate::server_stats;
 
 pub async fn run_server(endpoint: Extendable<quinn::Endpoint>) {
@@ -72,7 +72,7 @@ async fn handle_incoming_quic_connection_inner(
                 Ok(()) => {
                 }
                 Err(e) => {
-                    error!("{} stream handle error: {}", stream_id, e);
+                    info!("{} stream handle error: {}", stream_id, e);
                 }
             }
         });
@@ -87,9 +87,19 @@ async fn handle_server_stream_inner(send_stream_e: Extendable<SendStream>, recv_
     let (mut read, _, _) = recv_stream_e.unwrap();
     // first read length prefixed data for target address
     debug!("{} reading target address from client", stream_id);
-    let target_address = util::read_string(&mut read, None).await?;
-    info!("{} target address: {}. connecting...", stream_id, target_address);
+    let target_address = util::receive_map(&mut read, None).await?;
+    info!("{} target address: {:?}. connecting...", stream_id, target_address);
 
+    let source_ip = target_address.get("source_ip").unwrap();
+    let target_address = target_address.get("target").unwrap();
+
+    let acl_result = aclutil::is_acl_allowed(source_ip, target_address).await?;
+    if !acl_result {
+        let response = messages::build_connect_response(false);
+        write.write_all(&response).await?;
+        return Err(anyhow::anyhow!("{} ACL denied for source ip: {} target: {}", stream_id, source_ip, target_address));
+    }
+    // check ACL
     let tcp_stream = TcpStream::connect(&target_address).await;
     if tcp_stream.is_err() {
         let err = tcp_stream.err().unwrap();

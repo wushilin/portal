@@ -1,6 +1,7 @@
 use anyhow::Result;
 use lazy_static::lazy_static;
 use short_uuid::{ShortUuid, short};
+use tokio::sync::RwLock;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, info};
 use std::collections::HashMap;
@@ -12,15 +13,18 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use std::any::{Any, TypeId};
 
+use crate::aclutil::{ACLFile};
+
 lazy_static! {
     static ref NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(0);
+    pub static ref ACL: RwLock<Option<ACLFile>> = RwLock::new(None);
 }
 
 pub async fn read_string<R>(stream: &mut R, max_length: Option<usize>) -> Result<String>
 where
     R: AsyncRead + Unpin,
 {
-    let mut buffer = vec![0u8; max_length.unwrap_or(1024)];
+    let mut buffer = vec![0u8; max_length.unwrap_or(8096)];
     let n = read_length_prefixed(stream, &mut buffer).await?;
     if n == 0 {
         return Err(anyhow::anyhow!("read_string failed to read string: n == 0"));
@@ -382,4 +386,39 @@ pub async fn encode_map_as_json(map: &HashMap<String, String>) -> Result<String>
 pub async fn decode_json_as_map(json: &str) -> Result<HashMap<String, String>> {
     let map: HashMap<String, String> = serde_json::from_str(json)?;
     Ok(map)
+}
+
+pub async fn send_map<W>(stream: &mut W, map: &HashMap<String, String>) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let json = encode_map_as_json(map).await?;
+    write_string(stream, &json).await?;
+    Ok(())
+}
+
+pub async fn receive_map<R>(stream: &mut R, max_length: Option<usize>) -> Result<HashMap<String, String>>
+where
+    R: AsyncRead + Unpin,
+{
+    let json = read_string(stream, max_length).await?;
+    let map = decode_json_as_map(&json).await?;
+    Ok(map)
+}
+
+pub fn to_map(vec:Vec<String>) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    // using key, value, key, value pattern to insert into map
+    // use step of 2 to insert into map
+    for i in 0..vec.len() {
+        if i % 2 == 1 {
+            map.insert(vec[i-1].clone(), vec[i].clone());
+        }
+    }
+    map
+}
+
+pub async fn set_acl(acl: ACLFile) -> Option<ACLFile> {
+    let old = ACL.write().await.replace(acl);
+    old
 }

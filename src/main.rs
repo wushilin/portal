@@ -3,12 +3,13 @@ pub mod util;
 pub mod messages;
 pub mod server;
 pub mod client;
+pub mod aclutil;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::{net::SocketAddr};
+use std::{net::SocketAddr, process::exit};
 use tokio::{net::TcpListener, task::JoinHandle};
-use tracing::{info};
+use tracing::{error, info};
 pub mod server_stats;
 pub mod client_stats;
 
@@ -42,6 +43,9 @@ enum Commands {
 
         #[arg(short='i', help = "stats interval in seconds. default no stats", default_value = "60")]
         stats_interval: usize,
+
+        #[arg(long, help = "ACL file path, if not provided, no ACL will be used")]
+        acl:Option<String>,
     },
     /// Run the tunnel client
     Client {
@@ -90,7 +94,21 @@ async fn main() -> Result<()> {
             bind_addr,
             port,
             stats_interval,
+            acl,
         } => {
+
+            if acl.is_some() {
+                let acl_file = aclutil::load_acl(&acl.unwrap());
+                if acl_file.is_err() {
+                    error!("Failed to load ACL file: {:?}", acl_file.err().unwrap());
+                    exit(1);
+                }
+                let acl_file = acl_file.unwrap();
+                let old_acl =util::set_acl(acl_file).await;
+                if old_acl.is_some() {
+                    info!("ACL set, old ACL: {:?}", old_acl.unwrap());
+                }
+            }
             let server_config = quicutil::build_server_config(
                 &ca_bundle,
                 &cert,

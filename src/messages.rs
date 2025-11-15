@@ -1,12 +1,11 @@
+use std::collections::HashMap;
 
-pub fn build_connect_request(target:&str) -> Vec<u8> {
-    let bytes = target.as_bytes();
-    let length = bytes.len();
-    let mut buf = Vec::with_capacity(bytes.len() + 4);
-    let length_bytes = (length as u32).to_be_bytes();
-    buf.extend_from_slice(&length_bytes);
-    buf.extend_from_slice(bytes);
-    return buf;
+
+pub fn build_connect_request(target:&str, source_ip:&str) -> HashMap<String, String> {
+    let mut data = HashMap::<String, String>::new();
+    data.insert("target".to_string(), target.to_string());
+    data.insert("source_ip".to_string(), source_ip.to_string());
+    return data;
 }
 
 pub fn build_connect_response(ok:bool) -> Vec<u8> {

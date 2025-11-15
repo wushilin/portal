@@ -113,12 +113,14 @@ async fn my_open_bi(connection: &mut Extendable<quinn::Connection>, purpose: &st
 }
 
 async fn handle_client_connection(tcp_stream: TcpStream, target_address: String, bi_stream: (Extendable<SendStream>, Extendable<RecvStream>)) -> Result<()> {
+    let source_ip = tcp_stream.peer_addr().unwrap().ip().to_string();
     let (tcpr, tcpw) = tcp_stream.into_split();
     let (mut quic_send_stream_e, mut quic_recv_stream_e) = bi_stream;
     let stream_id = quic_recv_stream_e.get::<StreamId>().unwrap().clone();
-    let request = messages::build_connect_request(&target_address);
-    info!("{} sending connection request to server, target address: {:?}", stream_id, target_address);
-    quic_send_stream_e.as_mut().write_all(&request).await?;
+    let request = messages::build_connect_request(&target_address, &source_ip);
+    info!("{} sending connection request to server, target address: {:?} source ip: {}", stream_id, target_address, source_ip);
+    //quic_send_stream_e.as_mut().write_all(&request).await?;
+    util::send_map(quic_send_stream_e.as_mut(), &request).await?;
     let mut buffer = vec![0u8; 10];
     let response = read_length_prefixed(quic_recv_stream_e.as_mut(), &mut buffer).await?;
     info!("{} server connect response received", stream_id);
