@@ -62,9 +62,7 @@ async fn handle_incoming_quic_connection_inner(
         let stream = my_accept_bi(&mut connection, "ServerDataStream").await?;
         let (send_stream_e, recv_stream_e) = stream;
         let stream_id = recv_stream_e.get::<StreamId>().unwrap().clone();
-        info!("{} accepted stream {}", connection_id, stream_id);
         tokio::spawn(async move {
-            info!("{} stream handleing started", stream_id);
             server_stats::increment_active_streams();
             server_stats::increment_active_upstream_connections();
             let result = handle_server_stream_inner( send_stream_e, recv_stream_e).await;
@@ -84,7 +82,7 @@ async fn handle_incoming_quic_connection_inner(
 
 async fn handle_server_stream_inner(send_stream_e: Extendable<SendStream>, recv_stream_e: Extendable<RecvStream>) ->Result<()> {
     let stream_id = recv_stream_e.get::<StreamId>().unwrap().clone();
-
+    info!("{} stream handling started", stream_id);
     let (mut write, _, _) = send_stream_e.unwrap();
     let (mut read, _, _) = recv_stream_e.unwrap();
     // first read length prefixed data for target address
@@ -113,7 +111,7 @@ async fn handle_server_stream_inner(send_stream_e: Extendable<SendStream>, recv_
     info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
                 stream_id,
                 total_copied1, total_copied2);
-    info!("{} stream closed", stream_id);
+    info!("{} stream handling ended", stream_id);
     Ok(())
 }
 
