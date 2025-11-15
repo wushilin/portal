@@ -102,7 +102,9 @@ async fn main() -> Result<()> {
             let endpoint = quinn::Endpoint::server(server_config, bind_addr)?;
             info!("Server listening on {}", bind_addr);
             tokio::spawn(server::print_server_stats(stats_interval));
-            server::run_server(endpoint).await;
+            let mut server_extendable = util::Extendable::new(endpoint);
+            server_extendable.set_attribute("name".into(), "server".into());
+            server::run_server(server_extendable).await;
             info!("Server shutdown");
         }
         Commands::Client {
@@ -131,7 +133,7 @@ async fn main() -> Result<()> {
                 join_handles.push(join_handle);
             }
             for join_handle in join_handles {
-                join_handle.await?;
+                join_handle.await??;
             }
         }
     }
@@ -139,7 +141,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-pub async fn run_client_one_forward_spec(endpoint: quinn::Endpoint, server_address: String, forward_spec: String) -> Result<JoinHandle<()>> {
+pub async fn run_client_one_forward_spec(endpoint: quinn::Endpoint, server_address: String, forward_spec: String) -> Result<JoinHandle<Result<()>>> {
     let tokens = forward_spec.split('@').collect::<Vec<&str>>();
     if tokens.len() != 2 {
         return Err(anyhow::anyhow!("invalid forward spec: {}", forward_spec));

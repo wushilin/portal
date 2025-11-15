@@ -1,7 +1,7 @@
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 use lazy_static::lazy_static;
-use tracing::info;
+use tracing::{debug};
 
 lazy_static! {
     static ref CLIENT_STATS: Arc<ClientStats> = Arc::new(ClientStats::new());
@@ -70,42 +70,49 @@ pub fn get_total_received_bytes_counter() -> Arc<AtomicUsize> {
 }
 
 fn increment_total_connections() {
+    debug!("Increasing total connections");
     CLIENT_STATS.total_connections.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn increment_active_connections() {
+    debug!("Increasing active connections");
     increment_total_connections();
     CLIENT_STATS.active_connections.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn decrement_active_connections() {
+    debug!("Decreasing active connections");
     CLIENT_STATS.active_connections.fetch_sub(1, Ordering::Relaxed);
 }
 
 fn increment_total_streams() {
+    debug!("Increasing total streams");
     CLIENT_STATS.total_streams.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn increment_active_streams() {
     increment_total_streams();
-    info!("Increasing active streams");
+    debug!("Increasing active streams");
     CLIENT_STATS.active_streams.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn decrement_active_streams() {
-    info!("Decreasing active streams");
+    debug!("Decreasing active streams");
     CLIENT_STATS.active_streams.fetch_sub(1, Ordering::Relaxed);
 }
 
 fn increment_total_client_connections() {
+    debug!("Increasing total client connections");
     CLIENT_STATS.total_client_connections.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn increment_active_client_connections() {
+    debug!("Increasing active client connections");
     increment_total_client_connections();
     CLIENT_STATS.active_client_connections.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn decrement_active_client_connections() {
+    debug!("Decreasing active client connections");
     CLIENT_STATS.active_client_connections.fetch_sub(1, Ordering::Relaxed);
 }
