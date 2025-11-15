@@ -89,14 +89,14 @@ The portal prints stats like this periodcally.
 2025-11-15T08:05:35.836529Z  INFO portal::server: Stats: TC=5,AC=4,TS=213,AS=2,TUC=213,AUC=2,SENT=5.46 GiB,RECV=267.22 MiB
 ```
 
-TC = Total Connections (QUIC)
-AC = Active Connections (QUIC)
-TS = Total number of Streams (over QUIC)
-AS = Active number of Streams (over QUIC)
-TUC = Total Upstream Connections (The bridged TCP streams)
-AUC = Active Upstream Connections (Active bridged TCP Streams, typically = AS)
-SENT = Total data sent to remote server (QUIC clients)
-RECV = Total data received from remote server (QUIC clients)
+- TC = Total Connections (QUIC)
+- AC = Active Connections (QUIC)
+- TS = Total number of Streams (over QUIC)
+- AS = Active number of Streams (over QUIC)
+- TUC = Total Upstream Connections (The bridged TCP streams)
+- AUC = Active Upstream Connections (Active bridged TCP Streams, typically = AS)
+- SENT = Total data sent to remote server (QUIC clients)
+- RECV = Total data received from remote server (QUIC clients)
 
 
 
