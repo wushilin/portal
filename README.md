@@ -81,6 +81,25 @@ The connection will be tunneled through QUIC to the server, which will then conn
 - **Server Confirmation**: 1-byte ACK (value: 1) sent after successful target connection
 - **Data Forwarding**: Bidirectional streaming of raw bytes after confirmation
 
+## About status
+
+The portal prints stats like this periodcally.
+
+```
+2025-11-15T08:05:35.836529Z  INFO portal::server: Stats: TC=5,AC=4,TS=213,AS=2,TUC=213,AUC=2,SENT=5.46 GiB,RECV=267.22 MiB
+```
+
+TC = Total Connections (QUIC)
+AC = Active Connections (QUIC)
+TS = Total number of Streams (over QUIC)
+AS = Active number of Streams (over QUIC)
+TUC = Total Upstream Connections (The bridged TCP streams)
+AUC = Active Upstream Connections (Active bridged TCP Streams, typically = AS)
+SENT = Total data sent to remote server (QUIC clients)
+RECV = Total data received from remote server (QUIC clients)
+
+
+
 ## Security Note
 
 This implementation uses self-signed certificates and disables certificate verification for testing purposes. **Do not use in production without proper certificate management and verification.**
