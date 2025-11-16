@@ -24,6 +24,40 @@ cargo build --release
 
 ## Usage
 
+### ACL
+The server can accept a `--acl aclfile.acl` argument. 
+
+ACL example:
+```
+acl {
+  priority = 50
+  action = "allow"
+  from   = ["0.0.0.0/0"]
+
+  to {
+    hosts = ["somehost.*", ".*.google.com"]
+    ports = ["22", "1000-2000", "3000-4500"]
+  }
+}
+```
+
+From is CIDR list. It is evaluated as the real remote client (the client of portal client) ip address.
+
+action can be "allow" or "deny"
+
+Priority decides rule execution order. higher priority rules will be evaluated first. 
+For same priority rule, the rule defined earlier in the file will be evaluated first.
+
+To means a list of host by regex, case insensitive and a list of port, or port ranges.
+
+The ACL, if defined, will be evaluated in high priority -> low priority, earlier -> later for same priority until a decision is made. 
+
+If no rule matches, default is deny when no rule is matched. But you can change behavior by defining a rule with priority of -999999999, that accepts every thing.
+
+Note ACL matches the real client's IP and target address!
+
+A rejected client will be disconnected.
+
 ### Server Mode
 
 Start the tunnel server:
