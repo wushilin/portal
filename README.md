@@ -46,7 +46,7 @@ From is CIDR list. It is evaluated as the real remote client (the client of port
 action can be "allow" or "deny"
 
 Priority decides rule execution order. higher priority rules will be evaluated first. 
-For same priority rule, the rule defined earlier in the file will be evaluated first.
+For same priority rule, the rule defined earlier in the file will be evaluated first. Note priority is 32 bit signed integer. You can put negative priority if you want.
 
 To means a list of host by regex, case insensitive and a list of port, or port ranges.
 

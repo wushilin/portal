@@ -23,7 +23,7 @@ acl {
 }
 
 acl {
-  priority = 50
+  priority = -5555555555
   action = "allow"
   from   = ["0.0.0.0/0"]
 
