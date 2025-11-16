@@ -63,28 +63,42 @@ A rejected client will be disconnected.
 Start the tunnel server:
 
 ```bash
-./target/release/portal server --listen 0.0.0.0:4433
+./target/release/portal server
+```
+
+or
+```bash
+./target/release/portal server --help
+Usage: portal server [OPTIONS]
+
+Options:
+      --ca-bundle <CA_BUNDLE>  CA bundle file path [default: ca.pem]
+      --cert <CERT>            server certificate file path [default: server.pem]
+      --key <KEY>              server private key file path [default: server.key]
+      --bind-addr <BIND_ADDR>  server bind address, the tunnel server will listen on this address for QUIC connections [default: 0.0.0.0]
+      --port <PORT>            server port number, the tunnel server will listen on this port for QUIC connections [default: 1741]
+  -i <STATS_INTERVAL>          stats interval in seconds. default 60 seconds [default: 60]
+      --acl <ACL>              ACL file path, if not provided, no ACL will be used. See acl.hcl for format
+  -h, --help                   Print help
 ```
 
 The server will:
 - Listen for QUIC connections on the specified address
 - Accept bidirectional streams from clients
-- Read length-prefixed target addresses (host:port format)
+- Read client connect request like a proxy
 - Connect to the target and forward data bidirectionally
 
 ### Client Mode
 
 Start the tunnel client:
 
+Forward localhost of client machine 1022 to server's ssh port at localhost.
 ```bash
-./target/release/portal client \
-    --local 0.0.0.0:1122 \
-    --server 127.0.0.1:4433 \
-    --target example.com:80
+./target/release/portal client --server myhost.acme.com -L "0.0.0.0:1022@localhost:22"
 ```
 
 The client will:
-- Listen on the local address (e.g., `0.0.0.0:1122`)
+- Listen on the local address (e.g., `0.0.0.0:1022`)
 - When a connection is made to the local address, it:
   1. Opens a QUIC connection to the tunnel server
   2. Opens a bidirectional stream
@@ -92,34 +106,30 @@ The client will:
   4. Waits for server confirmation
   5. Starts bidirectional data forwarding
 
-## Example
+Or
+```bash
+./target/release/portal client --help
+Run the tunnel client
 
-1. Start the server:
-   ```bash
-   ./target/release/portal server --listen 0.0.0.0:4433
-   ```
+Usage: portal client [OPTIONS] --server <SERVER>
 
-2. Start the client:
-   ```bash
-   ./target/release/portal client \
-       --local 0.0.0.0:8080 \
-       --server 127.0.0.1:4433 \
-       --target httpbin.org:80
-   ```
+Options:
+      --ca-bundle <CA_BUNDLE>  CA bundle file path [default: ca.pem]
+      --cert <CERT>            client certificate file path [default: client.pem]
+      --key <KEY>              client private key file path [default: client.key]
+      --server <SERVER>        tunnel server address (e.g., tunnel.abc.com)
+      --port <PORT>            server port number, the tunnel server will listen on this port for QUIC connections [default: 1741]
+  -L <FORWARD_SPEC>            forward spec in 0.0.0.0:8080@remote_host:remote_port format. First part before @ is the local bind. Second part after @ is the remote address to forward to
+  -i <STATS_INTERVAL>          stats interval in seconds. default no stats [default: 60]
+  -h, --help                   Print help
+```
 
-3. Connect to the local port:
-   ```bash
-   curl http://localhost:8080/get
-   ```
 
-The connection will be tunneled through QUIC to the server, which will then connect to `httpbin.org:80`.
 
 ## Protocol Details
 
-- **Target Address Format**: Length-prefixed UTF-8 string in `host:port` format
-  - First 4 bytes: Big-endian u32 length
-  - Remaining bytes: UTF-8 string (e.g., "example.com:80")
-- **Server Confirmation**: 1-byte ACK (value: 1) sent after successful target connection
+- **Target Address Format**: Must be hostname:port format. Support bare IPv4/IPv6 + port format too.
+- **Client send request, server respond**: Like kafka, it is request/response system.
 - **Data Forwarding**: Bidirectional streaming of raw bytes after confirmation
 
 ## About status
@@ -144,6 +154,11 @@ The portal prints stats like this periodcally.
 ## Security Note
 
 This implementation uses self-signed certificates and disables certificate verification for testing purposes. **Do not use in production without proper certificate management and verification.**
+
+## Certificate limit
+Default certs is valid for *.wushilin.net, *.acme.com and *.test.com.
+
+Note that QUINN reject *.local SAN, so if you use such certs, it won't work. try other domain suffix, .local suffix is not working with Quinn!
 
 
 
