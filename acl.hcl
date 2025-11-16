@@ -42,3 +42,13 @@ acl {
     ports = ["22"]
   }
 }
+
+acl {
+  priority = 0
+  action = "allow"
+  from = ["::1"]
+  to {
+    hosts = ["localhost"]
+    ports = ["1222"]
+  }
+}

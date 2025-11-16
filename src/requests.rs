@@ -1,15 +1,27 @@
-use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering}};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
-use quinn::{RecvStream, SendStream};
-use serde::{Deserialize, Serialize};
-use strum::{EnumString, Display};
 use anyhow::Result;
 use lazy_static::lazy_static;
-use tokio::{io::{AsyncRead, AsyncWrite}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}}};
+use quinn::{RecvStream, SendStream};
+use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream,
+    },
+};
 use tracing::{debug, error, info, warn};
 
-use crate::{aclutil, util::{self, ConnectionId, Extendable, StreamId, read_string, write_string}};
 use crate::server_stats;
+use crate::{
+    aclutil,
+    util::{self, read_string, write_string, ConnectionId, Extendable, StreamId},
+};
 
 lazy_static! {
     static ref NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
@@ -79,7 +91,12 @@ impl Request {
     }
 
     pub fn build_error_response(&self, error_message: &str) -> Response {
-        Response::new(self.request_id, false, Some(error_message.to_string()), None)
+        Response::new(
+            self.request_id,
+            false,
+            Some(error_message.to_string()),
+            None,
+        )
     }
 }
 
@@ -105,8 +122,18 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn new(request_id: u64, success: bool, error_message: Option<String>, response_data: Option<HashMap<String, String>>) -> Self {
-        Self { request_id, success, error_message, response_data }
+    pub fn new(
+        request_id: u64,
+        success: bool,
+        error_message: Option<String>,
+        response_data: Option<HashMap<String, String>>,
+    ) -> Self {
+        Self {
+            request_id,
+            success,
+            error_message,
+            response_data,
+        }
     }
 
     pub fn add_data(&mut self, key: String, value: String) {
@@ -130,7 +157,7 @@ impl Response {
         Some(self.response_data.as_ref().unwrap())
     }
 
-    pub fn success(request_id:u64) -> Self {
+    pub fn success(request_id: u64) -> Self {
         Self::new(request_id, true, None, None)
     }
 
@@ -149,7 +176,7 @@ impl Response {
     pub fn get_response_data(&self) -> Option<&HashMap<String, String>> {
         self.response_data.as_ref()
     }
-    
+
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let response = serde_json::from_slice(bytes)?;
         Ok(response)
@@ -176,13 +203,17 @@ pub fn create_connect_request(target: &str, source_ip: &str) -> Request {
     request
 }
 
-pub async fn client_keep_alive_inner<R, W>(mut read: util::Extendable<R>, mut write: util::Extendable<W>, _read_first: Option<bool>) -> Result<()>
+pub async fn client_keep_alive_inner<R, W>(
+    mut read: util::Extendable<R>,
+    mut write: util::Extendable<W>,
+    _read_first: Option<bool>,
+) -> Result<()>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    use tokio::time::{interval, MissedTickBehavior, Duration};
-    
+    use tokio::time::{interval, Duration, MissedTickBehavior};
+
     let stream_id = read.get::<util::StreamId>().unwrap().clone();
     let ping_request = Request::new(RequestType::Ping);
     let mut interval = interval(Duration::from_secs(1));
@@ -191,14 +222,21 @@ where
         interval.tick().await;
         let response = make_request(read.as_mut(), write.as_mut(), &ping_request).await?;
         if response.is_error() {
-            warn!("{} keep_alive failed: {:?}", stream_id, response.error_message);
+            warn!(
+                "{} keep_alive failed: {:?}",
+                stream_id, response.error_message
+            );
             break;
         }
     }
     Ok(())
 }
 
-pub async fn make_request<R,W>(reader: &mut R, writer: &mut W, request: &Request) -> Result<Response> 
+pub async fn make_request<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    request: &Request,
+) -> Result<Response>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -232,16 +270,16 @@ where
 // response is sent to client, and if continue_loop is true, the loop continues
 // if the continue_loop is false, start data piping
 pub async fn handle_server_request(
-    connection_id: &ConnectionId, 
+    connection_id: &ConnectionId,
     stream_id: &StreamId,
-    request: &Request) -> Result<(Response, ServerNextStep)>
-{
+    request: &Request,
+) -> Result<(Response, ServerNextStep)> {
     let mut response = Response::success(request.request_id);
     let mut loop_action = ServerNextStep::ContinueLoop;
     debug!("{} handle server request started", stream_id);
     debug!("{} request {:?}", stream_id, request);
     match request.request_type {
-        RequestType::GetStreamMetadata=> {
+        RequestType::GetStreamMetadata => {
             response.add_data("build_branch".to_string(), util::get_build_branch());
             response.add_data("build_time".to_string(), util::get_build_time());
             response.add_data("build_host".to_string(), util::get_build_host());
@@ -251,23 +289,39 @@ pub async fn handle_server_request(
         RequestType::Connect => {
             let target = request.get_data("target").unwrap();
             let source_ip = request.get_data("source_ip").unwrap();
-            let acl_result = aclutil::is_acl_allowed(source_ip, target).await?;
-            if !acl_result {
-                response = request.build_error_response("ACL denied");
+            let acl_result = aclutil::is_acl_allowed(source_ip, target).await;
+            if acl_result.is_err() {
+                let err = acl_result.err().unwrap();
+                error!("{} handle server request failed: {}", stream_id, err);
+                response = request.build_error_response("ACL check failed");
                 loop_action = ServerNextStep::Disconnect;
             } else {
-                let tcp_stream = TcpStream::connect(target).await?;
-                let (read_tcp, write_tcp) = tcp_stream.into_split();
-                response = request.build_success_response();
-                let mut read_tcp_e = Extendable::new(read_tcp);
-                let mut write_tcp_e = Extendable::new(write_tcp);
-                read_tcp_e.attach(connection_id.clone());
-                read_tcp_e.attach(stream_id.clone());
-                write_tcp_e.attach(connection_id.clone());
-                write_tcp_e.attach(stream_id.clone());
-                loop_action = ServerNextStep::StartDataPiping(read_tcp_e, write_tcp_e);
+                let acl_result = acl_result.unwrap();
+                if !acl_result {
+                    response = request.build_error_response("ACL denied");
+                    loop_action = ServerNextStep::Disconnect;
+                } else {
+                    let tcp_stream = TcpStream::connect(target).await;
+                    if tcp_stream.is_err() {
+                        let err = tcp_stream.err().unwrap();
+                        error!("{} handle server request failed: {}", stream_id, err);
+                        response = request.build_error_response("TCP connection failed");
+                        loop_action = ServerNextStep::Disconnect;
+                    } else {
+                        let tcp_stream = tcp_stream.unwrap();
+                        let (read_tcp, write_tcp) = tcp_stream.into_split();
+                        response = request.build_success_response();
+                        let mut read_tcp_e = Extendable::new(read_tcp);
+                        let mut write_tcp_e = Extendable::new(write_tcp);
+                        read_tcp_e.attach(connection_id.clone());
+                        read_tcp_e.attach(stream_id.clone());
+                        write_tcp_e.attach(connection_id.clone());
+                        write_tcp_e.attach(stream_id.clone());
+                        loop_action = ServerNextStep::StartDataPiping(read_tcp_e, write_tcp_e);
+                    }
+                }
             }
-        },
+        }
         RequestType::Ping => {
             response = Response::success(request.request_id);
             loop_action = ServerNextStep::ContinueLoop;
@@ -280,11 +334,10 @@ pub async fn handle_server_request(
 }
 
 pub async fn run_server_loop(
-    mut recv_stream_e: Extendable<RecvStream>, 
+    mut recv_stream_e: Extendable<RecvStream>,
     mut send_stream_e: Extendable<SendStream>,
     purpose: &str,
-) -> Result<()>
-{
+) -> Result<()> {
     let connection_id = recv_stream_e.get::<ConnectionId>().unwrap().clone();
     let stream_id = recv_stream_e.get::<StreamId>().unwrap().clone();
     info!("{} server loop started for {}", stream_id, purpose);
@@ -298,15 +351,15 @@ pub async fn run_server_loop(
         }
         let request = request.unwrap();
         debug!("{} request read type {}", stream_id, request.request_type);
-        let  handle_result = handle_server_request(&connection_id, &stream_id, &request).await;
+        let handle_result = handle_server_request(&connection_id, &stream_id, &request).await;
         if handle_result.is_err() {
             let err = handle_result.err().unwrap();
             error!("{} handle server request failed: {}", stream_id, err);
             break;
         }
-        
+
         let (response, loop_action) = handle_result.unwrap();
-        let write_result =write_response(send_stream_e.as_mut(), &response).await;
+        let write_result = write_response(send_stream_e.as_mut(), &response).await;
         if write_result.is_err() {
             let err = write_result.err().unwrap();
             error!("{} write response failed: {}", stream_id, err);
@@ -324,13 +377,16 @@ pub async fn run_server_loop(
             ServerNextStep::StartDataPiping(mut read_tcp_e, mut write_tcp_e) => {
                 info!("{} starting data piping", stream_id);
                 let (total_copied1, total_copied2) = util::run_pipe(
-                    (read_tcp_e.as_mut(), write_tcp_e.as_mut()), 
-                    (recv_stream_e.as_mut(), send_stream_e.as_mut()), 
-                server_stats::get_received_bytes_counter(), 
-                server_stats::get_sent_bytes_counter()).await;
-                info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
-                    stream_id,
-                    total_copied1, total_copied2);
+                    (read_tcp_e.as_mut(), write_tcp_e.as_mut()),
+                    (recv_stream_e.as_mut(), send_stream_e.as_mut()),
+                    server_stats::get_received_bytes_counter(),
+                    server_stats::get_sent_bytes_counter(),
+                )
+                .await;
+                info!(
+                    "{} copied bytes: client -> upstream: {}, upstream -> client: {}",
+                    stream_id, total_copied1, total_copied2
+                );
                 info!("{} data piping ended", stream_id);
                 break;
             }
@@ -340,9 +396,11 @@ pub async fn run_server_loop(
     Ok(())
 }
 
-
-pub async fn client_keep_alive<R, W>(read: Extendable<R>, write: Extendable<W>, read_first: Option<bool>) 
-where
+pub async fn client_keep_alive<R, W>(
+    read: Extendable<R>,
+    write: Extendable<W>,
+    read_first: Option<bool>,
+) where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
