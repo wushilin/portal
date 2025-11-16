@@ -7,6 +7,14 @@ The speed over long distance is almost double of typical VPN implementation.
 
 Client -> PORTAL CLIENT (Bind: 0.0.0.0:443, Forward to PORTAL SERVER www.google.com:443) -----QUIC-----> PORTAL SERVER -----> www.google.com:443
 
+Why you may need this? This is more efficient than VPN, which introduces a packet drop possibility. This does not drop packets or retransmit packets. Anything outside the tunnel is local to local, high speed, and almost 0 loss. The tunnel is the only possible packet loss place but it is well coverred with QUIC. Generally it performs like 5 to 10 times better than VPN over very long distance!
+
+You can watch netflix from Singapore, for example, just:
+
+Forward your local port 443 on your home Raspberry PI at home to Netflix port 443, reconfigure your DNS and you are good to go!
+
+You can watch YouTube from china, for example, just:
+Forward your local port 443 on your home Raspberry PI at home to Alibaba cloud instance in Singapore, and forward to www.youtube.com:443, and reconfigre your DNS and you are good to go!
 
 
 ## Features
