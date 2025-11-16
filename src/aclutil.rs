@@ -6,7 +6,7 @@ use tracing::{debug, info};
 use std::fmt;
 use std::net::IpAddr;
 use std::str::FromStr;
-use regex::Regex;
+use regex::RegexBuilder;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use hcl::from_str;
 use anyhow::Result;
@@ -148,7 +148,15 @@ impl ACLFile {
 
     fn host_matches_pattern(host: &str, pattern: &str) -> bool {
         debug!("matching host: {} pattern: {}", host, pattern);
-        match Regex::new(pattern) {
+        
+        // Build regex with case-insensitive matching by default
+        // Users can override this for specific parts using inline flags:
+        // - (?-i) makes the following part case-sensitive
+        // - (?i) is redundant but harmless (already case-insensitive)
+        match RegexBuilder::new(pattern)
+            .case_insensitive(true)
+            .build()
+        {
             Ok(re) => re.is_match(host),
             Err(_) => false, // Invalid regex, doesn't match
         }
