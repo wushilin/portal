@@ -1,9 +1,10 @@
 pub mod quicutil;
-pub mod util;
 pub mod messages;
+pub mod aclutil;
+pub mod requests;
+pub mod util;
 pub mod server;
 pub mod client;
-pub mod aclutil;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

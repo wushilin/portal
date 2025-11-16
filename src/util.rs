@@ -2,18 +2,15 @@ use anyhow::Result;
 use lazy_static::lazy_static;
 use short_uuid::{ShortUuid, short};
 use tokio::sync::RwLock;
-use tokio::time::MissedTickBehavior;
-use tracing::{debug, info};
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use std::any::{Any, TypeId};
 
-use crate::aclutil::{ACLFile};
+use crate::aclutil::ACLFile;
 
 lazy_static! {
     static ref NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(0);
@@ -196,41 +193,7 @@ impl StreamId {
     }
 }
 
-pub async fn keep_alive<R, W>(read: Extendable<R>, write: Extendable<W>, read_first: Option<bool>) 
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    let connection_id = read.get::<ConnectionId>().unwrap().clone();
-    info!("{} keep_alive started", connection_id);
-    let _ = keep_alive_inner(read, write, read_first).await;
-    info!("{} keep_alive ended", connection_id);
-}
-pub async fn keep_alive_inner<R, W>(mut read: Extendable<R>, mut write: Extendable<W>, read_first: Option<bool>) -> Result<()>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    let payload = [0u8; 1];
-    let mut buf = vec![0u8; 1];
-    let read_first = read_first.unwrap_or(false);
-    let mut interval = tokio::time::interval(Duration::from_secs(1));
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    loop {
-        interval.tick().await;
-        if read_first {
-            read.read_exact(&mut buf).await?;
-            debug!("keep_alive read dummy byte");
-            write.write_all(&payload).await?;
-            debug!("keep_alive wrote dummy byte");
-        } else {
-            write.write_all(&payload).await?;
-            debug!("keep_alive wrote dummy byte");
-            read.read_exact(&mut buf).await?;
-            debug!("keep_alive read dummy byte");
-        }
-    }
-}
+
 
 
 pub struct AsyncCopy<R, W> where R: AsyncRead + Unpin, W: AsyncWrite + Unpin {
@@ -421,4 +384,16 @@ pub fn to_map(vec:Vec<String>) -> HashMap<String, String> {
 pub async fn set_acl(acl: ACLFile) -> Option<ACLFile> {
     let old = ACL.write().await.replace(acl);
     old
+}
+
+pub fn get_build_branch() -> String {
+    format!("{}", env!("BUILD_BRANCH"))
+}
+
+pub fn get_build_time() -> String {
+    format!("{}", env!("BUILD_TIME"))
+}
+
+pub fn get_build_host() -> String {
+    format!("{}", env!("BUILD_HOST"))
 }

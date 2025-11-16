@@ -1,13 +1,11 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 use crate::server_stats::ServerStatsClone;
-use crate::util::{self, ConnectionId, Extendable, StreamId, bytes_str, write_string};
+use crate::util::{ConnectionId, Extendable, StreamId, bytes_str};
 use quinn::{RecvStream, SendStream};
-use tokio::net::TcpStream;
 use anyhow::Result;
-use crate::{aclutil, messages};
+use crate::{requests};
 use crate::server_stats;
 
 pub async fn run_server(endpoint: Extendable<quinn::Endpoint>) {
@@ -52,79 +50,38 @@ async fn handle_incoming_quic_connection(incoming: Extendable<quinn::Incoming>) 
 async fn handle_incoming_quic_connection_inner(
     mut connection: Extendable<quinn::Connection>) -> Result<()> {
     let connection_id = connection.get::<ConnectionId>().unwrap().clone();
-    debug!("{} sending connection metadata", connection_id);
-    send_connection_metadata(&mut connection).await?;
-    debug!("{} connection metadata sent", connection_id);
-    info!("{} connection handle loop started", connection_id);
-    let (keep_alive_send_stream, keep_alive_recv_stream) = my_accept_bi(&mut connection, "KeepAlive").await?;
-    tokio::spawn(util::keep_alive(keep_alive_recv_stream, keep_alive_send_stream, None));
+    let accept_result = tokio::time::timeout(Duration::from_secs(3), my_accept_bi(&mut connection, "ServerControl")).await?;
+    if accept_result.is_err() {
+        return Err(anyhow::anyhow!("{} accept_bi timeout on server control stream", connection_id));
+    }
+    let (control_send, control_recv) = accept_result?;
+
+    debug!("{} spawning server loop for control stream", connection_id);
+    tokio::spawn(requests::run_server_loop(control_recv, control_send, "ServerControlStream"));
+    debug!("{} server loop for control stream spawned", connection_id);
+    info!("{} starting data link service loop", connection_id);
     loop {
         let stream = my_accept_bi(&mut connection, "ServerDataStream").await?;
         let (send_stream_e, recv_stream_e) = stream;
         let stream_id = recv_stream_e.get::<StreamId>().unwrap().clone();
         tokio::spawn(async move {
+            debug!("{} spawning server loop for stream {}", stream_id, stream_id);
             server_stats::increment_active_streams();
             server_stats::increment_active_upstream_connections();
-            let result = handle_server_stream_inner( send_stream_e, recv_stream_e).await;
+            let result = requests::run_server_loop( recv_stream_e, send_stream_e, "ServerDataStream").await;
             server_stats::decrement_active_streams();
             server_stats::decrement_active_upstream_connections();
             match result {
                 Ok(()) => {
                 }
                 Err(e) => {
-                    info!("{} stream handle error: {}", stream_id, e);
+                    info!("{} server loop error: {}", stream_id, e);
                 }
             }
+            debug!("{} server loop ended for stream {}", stream_id, stream_id);
         });
     }
 }
-
-
-async fn handle_server_stream_inner(send_stream_e: Extendable<SendStream>, recv_stream_e: Extendable<RecvStream>) ->Result<()> {
-    let stream_id = recv_stream_e.get::<StreamId>().unwrap().clone();
-    info!("{} stream handling started", stream_id);
-    let (mut write, _, _) = send_stream_e.unwrap();
-    let (mut read, _, _) = recv_stream_e.unwrap();
-    // first read length prefixed data for target address
-    debug!("{} reading target address from client", stream_id);
-    let target_address = util::receive_map(&mut read, None).await?;
-    info!("{} target address: {:?}. connecting...", stream_id, target_address);
-
-    let source_ip = target_address.get("source_ip").unwrap();
-    let target_address = target_address.get("target").unwrap();
-
-    let acl_result = aclutil::is_acl_allowed(source_ip, target_address).await?;
-    if !acl_result {
-        let response = messages::build_connect_response(false);
-        write.write_all(&response).await?;
-        return Err(anyhow::anyhow!("{} ACL denied for source ip: {} target: {}", stream_id, source_ip, target_address));
-    }
-    // check ACL
-    let tcp_stream = TcpStream::connect(&target_address).await;
-    if tcp_stream.is_err() {
-        let err = tcp_stream.err().unwrap();
-        error!("{} failed to connect to target address: {}", stream_id, err);
-        let response = messages::build_connect_response(false);
-        write.write_all(&response).await?;
-        return Err(anyhow::anyhow!("{} failed to connect to target address due to {}", stream_id, err));
-    }
-    let tcp_stream = tcp_stream.unwrap();
-    let response = messages::build_connect_response(true);
-    write.write_all(&response).await?;
-    info!("{} connected to target address: {}", stream_id, target_address);
-
-    let (read_tcp, write_tcp) = tcp_stream.into_split();
-    info!("{} started piping data", stream_id);
-    let (total_copied1, total_copied2) = util::run_pipe((read, write), (read_tcp, write_tcp), 
-    server_stats::get_received_bytes_counter(), 
-    server_stats::get_sent_bytes_counter()).await;
-    info!("{} copied bytes: client -> upstream: {}, upstream -> client: {}", 
-                stream_id,
-                total_copied1, total_copied2);
-    info!("{} stream handling ended", stream_id);
-    Ok(())
-}
-
 
 // my_accept_bi read 1 byte dummy data
 // then write the stream id to the client
@@ -142,25 +99,6 @@ async fn my_accept_bi(connection: &mut Extendable<quinn::Connection>, purpose: &
         send_stream_e.attach(stream_id.clone());
         recv_stream_e.attach(connection_id.clone());
         recv_stream_e.attach(stream_id.clone());
-        let mut buffer = vec![0u8; 1];
-        let read_result = tokio::time::timeout(Duration::from_secs(1), recv_stream_e.read_exact(&mut buffer)).await;
-        if read_result.is_err() {
-            error!("{} accept_bi timeout on dummy byte read", connection_id);
-            continue;
-        }
-        let read_result = read_result.unwrap();
-        if read_result.is_err() {
-            error!("{} accept_bi read dummy byte failed", connection_id);
-            continue;
-        }
-        let send_meta_result = send_stream_metadata(&mut send_stream_e).await;
-        if send_meta_result.is_err() {
-            let err = send_meta_result.err().unwrap();
-            error!("{} accept_bi failed to send stream metadata: {}", connection_id, err);
-            continue;
-        } else {
-            debug!("{} metadata sent to client {}", connection_id, stream_id);
-        }
         info!("{} accepted bi stream {} for {}", connection_id, stream_id, purpose);
         return Ok((send_stream_e, recv_stream_e));
     } 
@@ -185,25 +123,4 @@ pub async fn print_server_stats(stats_interval: usize) {
             bytes_str(stats.received_bytes));
     }
 }
-
-async fn send_connection_metadata(connection: &mut Extendable<quinn::Connection>) -> Result<()> {
-    let mut metadata = HashMap::<String, String>::new();
-    let connection_id = connection.get::<ConnectionId>().unwrap().clone();
-    metadata.insert("connection_id".into(), connection_id.to_string());
-    let json = util::encode_map_as_json(&metadata).await?;
-    let mut uni_stream = connection.open_uni().await?;
-    write_string(&mut uni_stream, &json).await?;
-    uni_stream.finish()?;
-    Ok(())
-}
-
-async fn send_stream_metadata(stream: &mut Extendable<SendStream>) -> Result<()> {
-    let mut metadata = HashMap::<String, String>::new();
-    let stream_id = stream.get::<StreamId>().unwrap().clone();
-    metadata.insert("stream_id".into(), stream_id.to_string());
-    let json = util::encode_map_as_json(&metadata).await?;
-    write_string(stream.as_mut(), &json).await?;
-    Ok(())
-}
-
 
