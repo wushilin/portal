@@ -42,10 +42,10 @@ enum Commands {
         #[arg(long, default_value = "1741", help = "server port number, the tunnel server will listen on this port for QUIC connections")]
         port: u16,
 
-        #[arg(short='i', help = "stats interval in seconds. default no stats", default_value = "60")]
+        #[arg(short='i', help = "stats interval in seconds. default 60 seconds", default_value = "60")]
         stats_interval: usize,
 
-        #[arg(long, help = "ACL file path, if not provided, no ACL will be used")]
+        #[arg(long, help = "ACL file path, if not provided, no ACL will be used. See acl.hcl for format")]
         acl:Option<String>,
     },
     /// Run the tunnel client
@@ -66,7 +66,7 @@ enum Commands {
         #[arg(long, default_value = "1741", help = "server port number, the tunnel server will listen on this port for QUIC connections")]
         port: u16,
 
-        #[arg(short='L', help = "forward spec in [0.0.0.0]:8080@remote_host:remote_port format")]
+        #[arg(short='L', help = "forward spec in 0.0.0.0:8080@remote_host:remote_port format. First part before @ is the local bind. Second part after @ is the remote address to forward to")]
         forward_spec: Vec<String>,
 
         #[arg(short='i', help = "stats interval in seconds. default no stats", default_value = "60")]
