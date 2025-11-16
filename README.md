@@ -2,6 +2,13 @@
 
 A QUIC-based tunnel that allows you to forward TCP connections through a QUIC tunnel server.
 
+It is like SSH Tunneling, but server allows you forward any port, as long as server ACL allows it.
+The speed over long distance is almost double of typical VPN implementation. 
+
+Client -> PORTAL CLIENT (Bind: 0.0.0.0:443, Forward to PORTAL SERVER www.google.com:443) -----QUIC-----> PORTAL SERVER -----> www.google.com:443
+
+
+
 ## Features
 
 - **Tunnel Server**: Accepts QUIC connections and forwards traffic to target hosts
