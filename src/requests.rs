@@ -357,7 +357,6 @@ pub async fn run_server_loop(
             error!("{} handle server request failed: {}", stream_id, err);
             break;
         }
-
         let (response, loop_action) = handle_result.unwrap();
         let write_result = write_response(send_stream_e.as_mut(), &response).await;
         if write_result.is_err() {
