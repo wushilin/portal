@@ -376,8 +376,8 @@ pub async fn run_server_loop(
             ServerNextStep::StartDataPiping(mut read_tcp_e, mut write_tcp_e) => {
                 info!("{} starting data piping", stream_id);
                 let (total_copied1, total_copied2) = util::run_pipe(
-                    (read_tcp_e.as_mut(), write_tcp_e.as_mut()),
                     (recv_stream_e.as_mut(), send_stream_e.as_mut()),
+                    (read_tcp_e.as_mut(), write_tcp_e.as_mut()),
                     server_stats::get_received_bytes_counter(),
                     server_stats::get_sent_bytes_counter(),
                 )
