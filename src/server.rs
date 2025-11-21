@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use tracing::{debug, info};
 use crate::server_stats::ServerStatsClone;
-use crate::util::{self, ConnectionId, Extendable, StreamId, bytes_str};
+use crate::util::{ConnectionId, Extendable, StreamId, bytes_str};
 use quinn::{RecvStream, SendStream};
 use anyhow::Result;
 use crate::{quicutil, requests};
