@@ -5,6 +5,7 @@ use rand::Rng;
 use std::{net::SocketAddr, time::Duration};
 use tokio::net::{TcpListener, TcpStream, lookup_host};
 
+use crate::quicutil;
 use crate::requests::{self, Request, RequestType};
 use crate::util::{self, ConnectionId, Extendable, StreamId, bytes_str};
 use crate::client_stats::{self, ClientStatsClone};
@@ -60,7 +61,6 @@ pub async fn run_client(mut tcp_listener: TcpListener, target_address: String, e
         }
 
         let connection = connection.unwrap();
-        
         let connection_e = Extendable::new(connection);
         client_stats::increment_active_connections();
         let handle_result = handle_server_connection( &mut tcp_listener, target_address.clone(), connection_e).await;
@@ -76,6 +76,8 @@ async fn handle_server_connection(tcp_listener: &mut TcpListener, target_address
     let (mut control_send, mut control_recv) = my_open_bi(&mut connection, "ClientControlStream").await?;
     let (connection_id, _) = client_hand_shake( &mut control_send, &mut control_recv).await?;
     connection.attach(connection_id.clone());
+    let peer_cn = quicutil::peer_cn(&connection).unwrap_or("unknown".to_string());
+    info!("{} client connected to {}, peer cn: {}", connection_id, connection.remote_address(), peer_cn);
     tokio::spawn(client_control_loop(control_send, control_recv));
     let _ = handle_client_connection_loop(tcp_listener, target_address, connection).await?;
     Ok(())
