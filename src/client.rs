@@ -190,7 +190,7 @@ async fn handle_client_connection(tcp_stream: TcpStream, target_address: String,
             client_stats::get_total_received_bytes_counter(),
             client_stats::get_total_sent_bytes_counter(),
             ).await;
-            info!("{} connection closed. total copied bytes: TCP -> QUIC: {}, QUIC -> TCP: {}", stream_id, total_copied1, total_copied2);
+            
             client_stats::decrement_active_client_connections();
             client_stats::decrement_active_streams();
         }
