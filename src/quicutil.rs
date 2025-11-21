@@ -150,6 +150,10 @@ pub fn extract_cn_from_cert(cert: &rustls_pki_types::CertificateDer) -> Result<S
     anyhow::bail!("CN not found in certificate");
 }
 
+pub fn peer_cn(connection: &quinn::Connection) -> Option<String> {
+    let peer_identity = connection.peer_identity()?;
+    return extract_cn_from_peer_identity(&peer_identity).ok()
+}
 /// Extract CN from a quinn connection's peer identity.
 /// This should be called after the connection handshake is complete.
 /// peer_identity is Box<dyn Any> which for rustls is Vec<rustls_pki_types::CertificateDer>

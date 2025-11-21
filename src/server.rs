@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use tracing::{debug, info};
 use crate::server_stats::ServerStatsClone;
-use crate::util::{ConnectionId, Extendable, StreamId, bytes_str};
+use crate::util::{self, ConnectionId, Extendable, StreamId, bytes_str};
 use quinn::{RecvStream, SendStream};
 use anyhow::Result;
-use crate::{requests};
+use crate::{quicutil, requests};
 use crate::server_stats;
 
 pub async fn run_server(endpoint: Extendable<quinn::Endpoint>) {
@@ -40,9 +40,10 @@ async fn handle_incoming_quic_connection(incoming: Extendable<quinn::Incoming>) 
     let connection_id = incoming.get::<ConnectionId>().unwrap().clone();
     let (incoming, _, _) = incoming.unwrap();
     let connection = incoming.accept()?.await?;
+    let remote_cert = quicutil::peer_cn(&connection).unwrap_or("unknown".to_string());
     let mut connection_e = Extendable::new(connection);
     connection_e.attach(connection_id.clone());
-    info!("{} accepted from {}", connection_id, connection_e.as_ref().remote_address());
+    info!("{} accepted from {}, peer cn: {}", connection_id, connection_e.as_ref().remote_address(), remote_cert);
     let handle_result = handle_incoming_quic_connection_inner(connection_e).await?;
     Ok(handle_result)
 }
