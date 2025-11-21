@@ -148,6 +148,7 @@ async fn my_open_bi(connection: &mut Extendable<quinn::Connection>, purpose: &st
 
 async fn handle_client_connection(tcp_stream: TcpStream, target_address: String, bi_stream: (Extendable<SendStream>, Extendable<RecvStream>)) -> Result<()> {
     let source_ip = tcp_stream.peer_addr().unwrap().ip().to_string();
+    let local_source_ip = tcp_stream.local_addr().map(|addr| addr.ip().to_string()).unwrap_or("unknown".to_string());
     let (tcpr, tcpw) = tcp_stream.into_split();
     let (mut quic_send_stream_e, mut quic_recv_stream_e) = bi_stream;
     let (_, stream_id) = client_hand_shake( &mut quic_send_stream_e, &mut quic_recv_stream_e).await?;
@@ -168,7 +169,7 @@ async fn handle_client_connection(tcp_stream: TcpStream, target_address: String,
     quic_recv_stream_e.attach(connection_id.clone());
     quic_recv_stream_e.attach(stream_id.clone());
 
-    let request = requests::create_connect_request(&target_address, &source_ip);
+    let request = requests::create_connect_request(&target_address, &source_ip, &local_source_ip);
     info!("{} sending connection request to server, target address: {:?} source ip: {}", stream_id, target_address, source_ip);
     //quic_send_stream_e.as_mut().write_all(&request).await?;
     let response = requests::make_request(quic_recv_stream_e.as_mut(), quic_send_stream_e.as_mut(), &request).await?;
@@ -190,6 +191,7 @@ async fn handle_client_connection(tcp_stream: TcpStream, target_address: String,
             client_stats::get_total_received_bytes_counter(),
             client_stats::get_total_sent_bytes_counter(),
             ).await;
+            info!("{} copied bytes: tcp -> quic: {}, quic -> tcp: {}", stream_id, total_copied1, total_copied2);
             
             client_stats::decrement_active_client_connections();
             client_stats::decrement_active_streams();

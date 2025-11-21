@@ -7,7 +7,6 @@ acl {
     "192.168.1.0/24",
   ]
 
-  ignore_ip = true
   to {
     hosts = [
       "^api\\.example\\.com$",

@@ -196,10 +196,11 @@ pub fn create_stream_meta_request() -> Request {
     Request::new(RequestType::GetStreamMetadata)
 }
 
-pub fn create_connect_request(target: &str, source_ip: &str) -> Request {
+pub fn create_connect_request(target: &str, source_ip: &str, local_source_ip: &str) -> Request {
     let mut request = Request::new(RequestType::Connect);
     request.add_data("target".to_string(), target.to_string());
     request.add_data("source_ip".to_string(), source_ip.to_string());
+    request.add_data("local_source_ip".to_string(), local_source_ip.to_string());
     request
 }
 
@@ -289,6 +290,8 @@ pub async fn handle_server_request(
         RequestType::Connect => {
             let target = request.get_data("target").unwrap();
             let source_ip = request.get_data("source_ip").unwrap();
+            let local_source_ip = request.get_data("local_source_ip").unwrap();
+            info!("{} connect request received: target: {}, source ip: {}, via: {}", stream_id, target, source_ip, local_source_ip);
             let acl_result = aclutil::is_acl_allowed(source_ip, target).await;
             if acl_result.is_err() {
                 let err = acl_result.err().unwrap();
